@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using Cache = Unity.VisualScripting.Cache;
 
 public class Player : MonoBehaviour
@@ -18,12 +19,15 @@ public class Player : MonoBehaviour
     [SerializeField] private float gravityScale;
 
     //[SerializeField] private float dampingRunning;
-    [Tooltip("When player is not pressing any move button movement is slowed using this value")]
+    [Tooltip("When player is not pressing any move button movement is slowed using this value. Must be less than one and at least zero")]
     [SerializeField] private float dampingStopping;
     //[SerializeField] private float dampingJumping;
-    
+
+    [SerializeField] private GridControl grid;
 
     [SerializeField] private Camera camera;
+
+    private List<uint> blocks = new List<uint>((int)BlockType.Count);
 
     private float rotationX;
     private float rotationY;
@@ -37,7 +41,8 @@ public class Player : MonoBehaviour
         //Cursor.lockState = CursorLockMode.Locked;
         rigidbody = GetComponent<Rigidbody>();
         rigidbody.freezeRotation = true;
-        Debug.Log(Physics.gravity.y);
+        // To make damping range in editor [0,1) we rescale it here
+        dampingStopping /= Time.fixedDeltaTime;
     }
 
     void Update()
@@ -56,6 +61,28 @@ public class Player : MonoBehaviour
 
         rotationX += rotationSpeed * mouseX;
 
+        if (Input.GetKeyDown(KeyCode.Mouse0) && Physics.Raycast(camera.transform.position, camera.transform.forward, out var hitInfo, 10f))
+        {
+            // Raycast hit some object
+            if (hitInfo.collider.gameObject.layer == GridControl.terrainLayer)
+            {
+                // Destroy the block
+                grid.BlockDestroyed(hitInfo.collider.gameObject.transform.position);
+                Destroy(hitInfo.collider.gameObject);
+            }
+        }
+        if (Input.GetKeyDown(KeyCode.Mouse1) && Physics.Raycast(camera.transform.position, camera.transform.forward, out var rayInfo, 10f))
+        {
+            // Raycast hit some object
+            if (rayInfo.collider.gameObject.layer == 8)
+            {
+                // Destroy the block
+                grid.BlockDestroyed(rayInfo.collider.gameObject.transform.position);
+                Destroy(rayInfo.collider.gameObject);
+
+            }
+        }
+        transform.Rotate(new Vector3(0, rotationSpeed * mouseX, 0));
         //camera.transform.localRotation.Set(camera.transform.localRotation.x, 0, 0, 0);
         transform.Rotate(new Vector3(0, rotationSpeed * mouseX, 0));
 
@@ -69,32 +96,26 @@ public class Player : MonoBehaviour
         if (Input.GetKey(KeyCode.W))
         {
             direction += transform.forward;
-            //rigidbody.AddForce(transform.forward * speed, ForceMode.Impulse);
         }
         if (Input.GetKey(KeyCode.S))
         {
             direction -= transform.forward;
-            //rigidbody.AddForce( -transform.forward * speed, ForceMode.Impulse);
         }
         if (Input.GetKey(KeyCode.A))
         {
             direction -= transform.right;
-            //rigidbody.AddForce(-transform.right * speed, ForceMode.Impulse);
         }
         if (Input.GetKey(KeyCode.D))
         {
             direction += transform.right;
-            //rigidbody.AddForce(transform.right * speed, ForceMode.Impulse);
         }
 
         
         if (Input.GetKey(KeyCode.Space))
         {
             lastJumpPress = Time.time;
-            //rigidbody.AddForce(Vector3.up * jumpPower, ForceMode.Impulse);
-
         }
-        if (groundCheck > 0 && Time.time - lastJumpPress < jumpDelay)
+        if (groundCheck > 0 && Time.time - lastJumpPress < jumpDelay && rigidbody.velocity.y < 0.5f)
         {
             rigidbody.velocity = new Vector3(rigidbody.velocity.x, jumpPower, rigidbody.velocity.z);
         }
@@ -107,11 +128,6 @@ public class Player : MonoBehaviour
 
         rigidbody.velocity += direction * acceleration * Time.deltaTime;
 
-
-        // TODO easier and better might be let unity handle the drag and just stop player when they are not moving
-        // when changing direction preserve only the component of velocity that is in the direction of movement
-        // when changing direction check dot product
-
         // horizontal velocity
         Vector3 horizontalVelocity = new Vector3(rigidbody.velocity.x, 0, rigidbody.velocity.z);
         // clamp magnitude of horizontal velocity
@@ -123,7 +139,6 @@ public class Player : MonoBehaviour
             horizontalVelocity.z);
     }
 
-    private bool Grounded = false;
     private int groundCheck = 0;
 
     private void OnTriggerEnter()
