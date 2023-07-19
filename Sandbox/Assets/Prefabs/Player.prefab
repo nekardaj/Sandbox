@@ -248,11 +248,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   speed: 6
   acceleration: 25
-  rotationSpeed: 2
+  rotationSpeed: 3.5
   jumpPower: 6
   jumpDelay: 0.05
   gravityScale: 1.5
   dampingStopping: 0.12
+  grid: {fileID: 0}
   camera: {fileID: 3166872490600050871}
 --- !u!65 &1194321768572483300
 BoxCollider:

@@ -9,7 +9,24 @@ public class Chunk : MonoBehaviour
 {
     public static readonly int ChunkSize = 16;
     public static readonly int ChunkHeight = 256;
-    
+
+    private static readonly int MaxAmplitude = 16;
+    private static readonly float StartFrequency = 0.0625f;
+    private static readonly int Octaves = 3;
+    public static int PerlinNoise(int x, int z)
+    {
+        int amplitude = MaxAmplitude;
+        float frequency = StartFrequency;
+        int value = 0;
+        for (int i = 0; i < Octaves; i++)
+        {
+            value += (int)(amplitude * Mathf.PerlinNoise(x * frequency, z * frequency));
+            amplitude /= 2;
+            frequency *= 2;
+        }
+
+        return value;
+    }
 
     // another optimization might be to disable chunks that are not visible to the player
     // eg using heuristic using lowest and highest block in the chunk
@@ -38,7 +55,7 @@ public class Chunk : MonoBehaviour
             {
                 GameObject gridElement = Instantiate(GridControl.GridElementPrefab[(int)BlockType.Grass], transform);
                 gridElement.name = "GridElement_" + i + "," + j;
-                int height = (int)(4 * Mathf.PerlinNoise(i / 4f, j / 4f));
+                int height = PerlinNoise(x * ChunkSize + i,z * ChunkSize + j);
                 gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int( x * ChunkSize + i, height, z * ChunkSize + j));
             }
         }
@@ -50,7 +67,7 @@ public class Chunk : MonoBehaviour
         int x = position.x - this.x * ChunkSize;
         int z = position.z - this.z * ChunkSize;
         // notify the column
-        columns[x,z].BlockDestroyed(position.x, position.y, position.z);
+        columns[x,z].BlockDestroyed(position.x, position.y, position.z, this);
     }
 
     private int x;
@@ -72,8 +89,14 @@ public abstract class Column
     // y coord is enough?
     // block destruction forces an instantiation of a new block
     // so adding some information to it wont be a problem (eg a bitmask)
-    public abstract void BlockDestroyed(int x, int y, int z);
-    public abstract void BlockPlaced(int x, int y, int z);
+
+    /// <summary>
+    /// When a block is destroyed usually new one becomes visible and must be instantiated
+    /// We need to set the parent to chunk so disabling works, so we need to pass the reference
+    /// </summary>
+    /// <param name="chunk">Chunk owning this column</param>
+    public abstract void BlockDestroyed(int x, int y, int z, Chunk chunk);
+    public abstract void BlockPlaced(int x, int y, int z, Chunk chunk);
     /*
     // because all neighbors are not instantiated during constructor of column we need to check which blocks to spawn after
     public abstract void Update()
@@ -92,14 +115,15 @@ public class UnmodifiedColumn : Column
 {
     // instantiate needs some transform as an argument
     private static Transform transform = new GameObject().transform;
-    public override void BlockDestroyed(int x, int y, int z)
+    public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
     {
         GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)BlockType.Grass], transform);
         gridElement.name = "GridElement_" + x + "," + z;
         gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x , y - 1, z ));
+        gridElement.transform.parent = chunk.transform; // all chunks have 0,0,0 as their position
     }
 
-    public override void BlockPlaced(int x, int z, int y)
+    public override void BlockPlaced(int x, int z, int y, Chunk chunk)
     {
         
     }
@@ -122,13 +146,13 @@ public class UnmodifiedColumn : Column
 
 public class ModifiedColumn : Column
 {
-    public override void BlockDestroyed(int x, int y, int z)
+    public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
     {
         throw new System.NotImplementedException();
     }
     // add list of tuples height and type of block to save memory
     // worst case it is twice as much as if saving 256 enum entries but in most cases it will be much less
-    public override void BlockPlaced(int x, int y, int z)
+    public override void BlockPlaced(int x, int y, int z, Chunk chunk)
     {
         throw new System.NotImplementedException();
     }

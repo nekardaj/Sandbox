@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -29,7 +30,8 @@ public class Player : MonoBehaviour
 
     private List<uint> blocks = new List<uint>((int)BlockType.Count);
 
-    private float rotationX;
+    // We need to enable chunks dynamically when the player walks near them
+
     private float rotationY;
 
     private float lastJumpPress = float.MinValue;
@@ -43,6 +45,9 @@ public class Player : MonoBehaviour
         rigidbody.freezeRotation = true;
         // To make damping range in editor [0,1) we rescale it here
         dampingStopping /= Time.fixedDeltaTime;
+        // make sure the player spawns above ground
+        var gridPosition = GridControl.grid.WorldToCell(transform.position);
+        transform.position = new Vector3(0, Chunk.PerlinNoise(gridPosition.x, gridPosition.z) + 2, 0);
     }
 
     void Update()
@@ -55,11 +60,9 @@ public class Player : MonoBehaviour
 
         // we want to rotate with respect to right vector of the player so when we rotate whole player around y camera local x is right
         rotationY -= rotationSpeed * mouseY;
-        rotationY = Mathf.Clamp(rotationY, -80, 80);
+        rotationY = Mathf.Clamp(rotationY, -90, 80);
         camera.transform.localRotation = Quaternion.Euler(rotationY, 0, 0);
         //camera.transform.Rotate(camera.transform.right, -rotationSpeed * mouseY, Space.World);
-
-        rotationX += rotationSpeed * mouseX;
 
         if (Input.GetKeyDown(KeyCode.Mouse0) && Physics.Raycast(camera.transform.position, camera.transform.forward, out var hitInfo, 10f))
         {
@@ -68,6 +71,16 @@ public class Player : MonoBehaviour
             {
                 // Destroy the block
                 grid.BlockDestroyed(hitInfo.collider.gameObject.transform.position);
+                // when the player is standing on top of the block it messes up ground checking
+                // so we need to check if the player is standing on top of the block
+                // if so we need to manually decrease ground check
+                // does not always prevent this for happening, player can enjoy "flying" then
+                var diff = transform.position - hitInfo.collider.gameObject.transform.position;
+                if (diff.y < 0.52f && diff.y > 0.49f && Math.Abs(diff.x) < 0.5f && Math.Abs(diff.z) < 0.5f)
+                {
+                    Debug.Log("Destroyed block under player");
+                    //groundCheck -= 1; // I wanna fly
+                }
                 Destroy(hitInfo.collider.gameObject);
             }
         }
@@ -83,8 +96,7 @@ public class Player : MonoBehaviour
             }
         }
         transform.Rotate(new Vector3(0, rotationSpeed * mouseX, 0));
-        //camera.transform.localRotation.Set(camera.transform.localRotation.x, 0, 0, 0);
-        transform.Rotate(new Vector3(0, rotationSpeed * mouseX, 0));
+        grid.UpdatePosition(transform.position);
 
     }
     void FixedUpdate()
@@ -110,7 +122,6 @@ public class Player : MonoBehaviour
             direction += transform.right;
         }
 
-        
         if (Input.GetKey(KeyCode.Space))
         {
             lastJumpPress = Time.time;
