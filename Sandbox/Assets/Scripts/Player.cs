@@ -60,7 +60,7 @@ public class Player : MonoBehaviour
 
         // we want to rotate with respect to right vector of the player so when we rotate whole player around y camera local x is right
         rotationY -= rotationSpeed * mouseY;
-        rotationY = Mathf.Clamp(rotationY, -90, 80);
+        rotationY = Mathf.Clamp(rotationY, -80, 90);
         camera.transform.localRotation = Quaternion.Euler(rotationY, 0, 0);
         //camera.transform.Rotate(camera.transform.right, -rotationSpeed * mouseY, Space.World);
 

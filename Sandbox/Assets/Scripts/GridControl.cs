@@ -31,6 +31,9 @@ public class GridControl : MonoBehaviour
 
     [SerializeField] private Player player;
 
+    // bedrock should be infinite layer so we move big object under player
+    [SerializeField] private GameObject bedrock;
+
     public static readonly int terrainLayer = 8;
 
     private Vector3Int lastChunk;
@@ -88,6 +91,7 @@ public class GridControl : MonoBehaviour
     public void UpdatePosition(Vector3 position)
     {
         Vector3Int chunk = WorldToChunk(position);
+        //bedrock.transform.position = new Vector3(grid.WorldToCell(position).x, bedrock.transform.position.y, grid.WorldToCell(position).x);
         // disable chunk that are now too far from player and enable or instantiate new ones that are close
         void ActivateChunk(int x, int z)
         {
@@ -139,6 +143,7 @@ public class GridControl : MonoBehaviour
             {
                 for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
                 {
+
                     chunkSortedDictionary[new Tuple<int, int>(i, lastChunk.z + RenderDistance)].gameObject.SetActive(false);
                     ActivateChunk(i, chunk.z - RenderDistance);
                 }

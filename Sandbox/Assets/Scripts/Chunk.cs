@@ -1,6 +1,15 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+
+public enum Direction
+{
+    North,
+    East,
+    South,
+    West
+}
 
 /// <summary>
 /// Chunk is a game object so the whole chunk can be disabled when player is far away
@@ -27,11 +36,43 @@ public class Chunk : MonoBehaviour
 
         return value;
     }
+    private static readonly int MinimalSnowHeight = 20;
+    private static readonly int MinimalGrassHeight = 8;
+    private static readonly int NormalGrassLayer = 4;
+    /// <summary>
+    /// Using only height to determine block type would look bad
+    /// So I am going use fixed grass and snow layer width and add some noise to it 
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <param name="z"></param>
+    /// <returns></returns>
+    public static BlockType GetBlockType(int x, int y, int z)
+    {
+        //int height = PerlinNoise(x, z);
+        if (y > 19)
+        {
+            return BlockType.Snow;
+        }
+        else if (y > 10)
+        {
+            return BlockType.Grass;
+        }
+        else
+        {
+            return BlockType.Rock;
+        }
+    }
 
     // another optimization might be to disable chunks that are not visible to the player
     // eg using heuristic using lowest and highest block in the chunk
     public Chunk[] neighbors = new Chunk[4]; // 4 neighbors
-    
+
+    public void RegisterNeighbor(Chunk chunk, Direction direction)
+    {
+        neighbors[(int)direction] = chunk;
+    }
+
     // these values can be used for optimization
     public int minimalHeight;
     public int maximalHeight;
@@ -46,17 +87,7 @@ public class Chunk : MonoBehaviour
         {
             for (int j = 0; j < ChunkSize; j++)
             {
-                columns[i,j] = new UnmodifiedColumn(x + i, z + j);
-            }
-        }
-        for (int i = 0; i < ChunkSize; i++)
-        {
-            for (int j = 0; j < ChunkSize; j++)
-            {
-                GameObject gridElement = Instantiate(GridControl.GridElementPrefab[(int)BlockType.Grass], transform);
-                gridElement.name = "GridElement_" + i + "," + j;
-                int height = PerlinNoise(x * ChunkSize + i,z * ChunkSize + j);
-                gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int( x * ChunkSize + i, height, z * ChunkSize + j));
+                columns[i,j] = new UnmodifiedColumn(x * ChunkSize + i, z * ChunkSize + j);
             }
         }
     }
@@ -67,7 +98,12 @@ public class Chunk : MonoBehaviour
         int x = position.x - this.x * ChunkSize;
         int z = position.z - this.z * ChunkSize;
         // notify the column
-        columns[x,z].BlockDestroyed(position.x, position.y, position.z, this);
+        Column column = columns[x, z];
+        if (column.GetType() == typeof(UnmodifiedColumn))
+        {
+            //columns[x,z] = column.Deconstruct()
+        }
+        column.BlockDestroyed(position.x, position.y, position.z, this);
     }
 
     private int x;
@@ -117,12 +153,29 @@ public class UnmodifiedColumn : Column
     private static Transform transform = new GameObject().transform;
     public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
     {
-        GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)BlockType.Grass], transform);
+        GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int) Chunk.GetBlockType(x,y - 1, z)], transform);
         gridElement.name = "GridElement_" + x + "," + z;
         gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x , y - 1, z ));
+        blocks.Remove(y - 1);
+        blocks.Add(y - 1, gridElement);
+
         gridElement.transform.parent = chunk.transform; // all chunks have 0,0,0 as their position
     }
 
+    /// <summary>
+    /// Convert data to modified column and return it
+    /// </summary>
+    /// <returns>This column data represented by ModifiedColumn class</returns>
+    public ModifiedColumn Construct()
+    {
+        //ModifiedColumn column = new ModifiedColumn(x, z);
+        List<Tuple<int, BlockType>> blocks = new List<Tuple<int, BlockType>>();
+        //indexof key
+        // .keys property and use binary search to find upper bound
+        //return column;
+        // keep it simple, this does not happen often
+        return null;
+    }
     public override void BlockPlaced(int x, int z, int y, Chunk chunk)
     {
         
@@ -132,13 +185,19 @@ public class UnmodifiedColumn : Column
     {
         this.x = x;
         this.z = z;
+        // top block of new chunk can always be seen
+        int height = Chunk.PerlinNoise(x, z);
+        GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, height, z)], transform);
+        gridElement.name = "GridElement_" + x + "," + z;
+        gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, height, z));
+        blocks.Add(height, gridElement);
     }
 
     public int x;
     public int z;
     public int height;
     // having entry for every spawned cube is not ideal however spawning the Game Object is bigger compared to one entry
-    private SortedDictionary<int, GameObject> cubes = new SortedDictionary<int, GameObject>();
+    private SortedDictionary<int, GameObject> blocks = new SortedDictionary<int, GameObject>();
     public List<int> layerHeight = new List<int>((int)BlockType.Count);
 
 
@@ -146,12 +205,15 @@ public class UnmodifiedColumn : Column
 
 public class ModifiedColumn : Column
 {
+    private SortedDictionary<int, BlockType> blocks;
     public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
     {
         throw new System.NotImplementedException();
     }
     // add list of tuples height and type of block to save memory
     // worst case it is twice as much as if saving 256 enum entries but in most cases it will be much less
+
+    private SortedDictionary<int, GameObject> cubes = new SortedDictionary<int, GameObject>();
     public override void BlockPlaced(int x, int y, int z, Chunk chunk)
     {
         throw new System.NotImplementedException();
