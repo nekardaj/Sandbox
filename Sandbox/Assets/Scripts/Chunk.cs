@@ -87,7 +87,7 @@ public class Chunk : MonoBehaviour
         {
             for (int j = 0; j < ChunkSize; j++)
             {
-                columns[i,j] = new UnmodifiedColumn(x * ChunkSize + i, z * ChunkSize + j);
+                columns[i,j] = new UnmodifiedColumn(x * ChunkSize + i, z * ChunkSize + j, this);
             }
         }
     }
@@ -181,7 +181,7 @@ public class UnmodifiedColumn : Column
         
     }
 
-    public UnmodifiedColumn(int x, int z)
+    public UnmodifiedColumn(int x, int z, Chunk chunk)
     {
         this.x = x;
         this.z = z;
@@ -190,6 +190,7 @@ public class UnmodifiedColumn : Column
         GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, height, z)], transform);
         gridElement.name = "GridElement_" + x + "," + z;
         gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, height, z));
+        gridElement.transform.parent = chunk.gameObject.transform;
         blocks.Add(height, gridElement);
     }
 
