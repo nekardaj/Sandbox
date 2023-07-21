@@ -46,6 +46,13 @@ public class GridControl : MonoBehaviour
     // chunks that are too far from player will be disabled
     public static readonly int RenderDistance = 1;
 
+    public static readonly Tuple<int, int>[] Directions = new Tuple<int, int>[]
+    {
+        new Tuple<int, int>(0,1),
+        new Tuple<int, int>(1,0),
+        new Tuple<int, int>(0,-1),
+        new Tuple<int, int>(-1,0)
+    };
 
     // We need to create chunks dynamically as the player walks near them
     // The coordinates of chunks that need to be active are arbitrary(based on player movement)

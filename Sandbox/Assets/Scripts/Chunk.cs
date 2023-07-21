@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using JetBrains.Annotations;
 using UnityEngine;
 
 public enum Direction
@@ -153,13 +154,15 @@ public class UnmodifiedColumn : Column
     private static Transform transform = new GameObject().transform;
     public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
     {
-        GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int) Chunk.GetBlockType(x,y - 1, z)], transform);
-        gridElement.name = "GridElement_" + x + "," + z;
-        gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x , y - 1, z ));
-        blocks.Remove(y - 1);
-        blocks.Add(y - 1, gridElement);
-
-        gridElement.transform.parent = chunk.transform; // all chunks have 0,0,0 as their position
+        if (!blocks.ContainsKey(y - 1))
+        {
+            GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, y - 1, z)], transform);
+            gridElement.name = "GridElement_" + x + "," + z;
+            gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, y - 1, z));
+            blocks.Add(y - 1, gridElement);
+            gridElement.transform.parent = chunk.transform; // all chunks have 0,0,0 as their position
+        }
+        blocks.Remove(y);
     }
 
     /// <summary>
@@ -169,7 +172,14 @@ public class UnmodifiedColumn : Column
     public ModifiedColumn Construct()
     {
         //ModifiedColumn column = new ModifiedColumn(x, z);
-        List<Tuple<int, BlockType>> blocks = new List<Tuple<int, BlockType>>();
+        SortedDictionary<int, BlockType> layers = new SortedDictionary<int, BlockType>();
+        for (int i = 0; i < layerHeight.Count; i++)
+        {
+            // Since there are as many layers as types of blocks we can cast index to BlockType to get the type
+            layers.Add(layerHeight[i], (BlockType)i);
+        }
+
+        ModifiedColumn newColumn = new ModifiedColumn(x, z, blocks, layers);
         //indexof key
         // .keys property and use binary search to find upper bound
         //return column;
@@ -185,13 +195,28 @@ public class UnmodifiedColumn : Column
     {
         this.x = x;
         this.z = z;
+        int minNeigbor = int.MaxValue;
+        for (int i = 0; i < 4; i++)
+        {
+            Tuple<int, int> offset = GridControl.Directions[i];
+            minNeigbor = Math.Min(Chunk.PerlinNoise(x + offset.Item1, z + offset.Item2), minNeigbor);
+        }
         // top block of new chunk can always be seen
         int height = Chunk.PerlinNoise(x, z);
         GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, height, z)], transform);
-        gridElement.name = "GridElement_" + x + "," + z;
+        gridElement.name = "GridElement_" + x + "," + height + "," + z;
         gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, height, z));
         gridElement.transform.parent = chunk.gameObject.transform;
         blocks.Add(height, gridElement);
+        // top block must always be spawned, others depend on neighbors
+        for (int i = height - 1; i > minNeigbor; i--)
+        {
+            gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, i, z)], transform);
+            gridElement.name = "GridElement_" + x + "," + i + "," + z;
+            gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, i, z));
+            gridElement.transform.parent = chunk.gameObject.transform;
+            blocks.Add(i, gridElement);
+        }
     }
 
     public int x;
@@ -206,7 +231,17 @@ public class UnmodifiedColumn : Column
 
 public class ModifiedColumn : Column
 {
-    private SortedDictionary<int, BlockType> blocks;
+    public ModifiedColumn(int x, int z, SortedDictionary<int, GameObject> blocks_, SortedDictionary<int, BlockType> layers_)
+    {
+        this.x = x;
+        this.z = z;
+        blocks = blocks_;
+        layerHeights = layers_;
+    }
+
+    private SortedDictionary<int, BlockType> layerHeights;
+    private int x;
+    private int z;
     public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
     {
         throw new System.NotImplementedException();
@@ -214,7 +249,7 @@ public class ModifiedColumn : Column
     // add list of tuples height and type of block to save memory
     // worst case it is twice as much as if saving 256 enum entries but in most cases it will be much less
 
-    private SortedDictionary<int, GameObject> cubes = new SortedDictionary<int, GameObject>();
+    private SortedDictionary<int, GameObject> blocks = new SortedDictionary<int, GameObject>();
     public override void BlockPlaced(int x, int y, int z, Chunk chunk)
     {
         throw new System.NotImplementedException();
