@@ -8,8 +8,8 @@ public enum Direction
 {
     North,
     East,
-    South,
-    West
+    West,
+    South
 }
 
 /// <summary>
@@ -82,7 +82,6 @@ public class Chunk : MonoBehaviour
     {
         this.x = x;
         this.z = z;
-        modified = new bool[ChunkSize,ChunkSize]; // default value is false so we dont need to initialize it
         columns = new Column[ChunkSize,ChunkSize];
         for (int i = 0; i < ChunkSize; i++)
         {
@@ -96,6 +95,7 @@ public class Chunk : MonoBehaviour
     public void BlockDestroyed(Vector3Int position)
     {
         // calculate relative position in chunk
+        modified = true;
         int x = position.x - this.x * ChunkSize;
         int z = position.z - this.z * ChunkSize;
         // notify the column
@@ -105,13 +105,41 @@ public class Chunk : MonoBehaviour
             //columns[x,z] = column.Deconstruct()
         }
         column.BlockDestroyed(position.x, position.y, position.z, this);
+        for (int i = 0; i < 4; i++)
+        {
+            Tuple<int, int> offset = GridControl.Directions[i];
+            var neighbor = new Tuple<int,int>(x + offset.Item1, z + offset.Item2);
+            if (neighbor.Item1 >= 0 && neighbor.Item1 < ChunkSize && neighbor.Item2 >= 0 && neighbor.Item2 < ChunkSize)
+            {
+                columns[neighbor.Item1, neighbor.Item2].NeighborDestroyed(position.x + offset.Item1,position.y,position.z + offset.Item2, this);
+            }
+            else
+            {
+                // find the column in neighboring chunk
+                //neighbors[i].NeighborDestroyed(position.x, position.y, position.z, this);
+                // only one coordinate is out of bounds
+                if (neighbor.Item1 < 0 || neighbor.Item1 >= ChunkSize)
+                {
+                    neighbors[i].columns[neighbor.Item1 > ChunkSize ? 0 : (ChunkSize - 1),z].NeighborDestroyed(position.x + offset.Item1, position.y, position.z + offset.Item2, neighbors[i]);
+                }
+                else
+                {
+                    neighbors[i].columns[x, neighbor.Item2 > ChunkSize ? 0 : (ChunkSize - 1)].NeighborDestroyed(position.x + offset.Item1, position.y, position.z + offset.Item2, neighbors[i]);
+                }
+            }
+        }
+    }
+
+    public void BlockPlaced()
+    {
+
     }
 
     private int x;
     private int z;
 
     private Column[,] columns = new Column[ChunkSize, ChunkSize];
-    private bool[,] modified = new bool[ChunkSize, ChunkSize];
+    private bool modified = false;
 
 }
 
@@ -134,6 +162,7 @@ public abstract class Column
     /// <param name="chunk">Chunk owning this column</param>
     public abstract void BlockDestroyed(int x, int y, int z, Chunk chunk);
     public abstract void BlockPlaced(int x, int y, int z, Chunk chunk);
+    public abstract void NeighborDestroyed(int x, int y, int z, Chunk chunk);
     /*
     // because all neighbors are not instantiated during constructor of column we need to check which blocks to spawn after
     public abstract void Update()
@@ -191,6 +220,18 @@ public class UnmodifiedColumn : Column
         
     }
 
+    public override void NeighborDestroyed(int x, int y, int z, Chunk chunk)
+    {
+        if (Chunk.PerlinNoise(x,z) >= y && !blocks.ContainsKey(y))
+        {
+            GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, y, z)], transform);
+            gridElement.name = "GridElement_" + x + "," + z;
+            gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, y, z));
+            blocks.Add(y, gridElement);
+            gridElement.transform.parent = chunk.transform; // all chunks have 0,0,0 as their position
+        }
+    }
+
     public UnmodifiedColumn(int x, int z, Chunk chunk)
     {
         this.x = x;
@@ -246,6 +287,11 @@ public class ModifiedColumn : Column
     {
         throw new System.NotImplementedException();
     }
+    public override void NeighborDestroyed(int x, int y, int z, Chunk chunk)
+    {
+        throw new NotImplementedException();
+    }
+
     // add list of tuples height and type of block to save memory
     // worst case it is twice as much as if saving 256 enum entries but in most cases it will be much less
 

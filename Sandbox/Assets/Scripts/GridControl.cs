@@ -48,10 +48,11 @@ public class GridControl : MonoBehaviour
 
     public static readonly Tuple<int, int>[] Directions = new Tuple<int, int>[]
     {
+        // Same order as in Direction enum - NEWS, in this order 3 - index gets opposite one
         new Tuple<int, int>(0,1),
         new Tuple<int, int>(1,0),
-        new Tuple<int, int>(0,-1),
-        new Tuple<int, int>(-1,0)
+        new Tuple<int, int>(-1,0),
+        new Tuple<int, int>(0,-1)
     };
 
     // We need to create chunks dynamically as the player walks near them
@@ -114,6 +115,17 @@ public class GridControl : MonoBehaviour
                 Chunk chunk_ = object_.AddComponent<Chunk>();
                 chunk_.Initialize(x, z);
                 chunkSortedDictionary.Add(new Tuple<int, int>(x, z), chunk_);
+                // New chunk was created, notify all neighbors that already exist
+                for (int i = 0; i < 4; i++)
+                {
+                    Tuple<int, int> offset = GridControl.Directions[i];
+                    if (chunkSortedDictionary.TryGetValue(new Tuple<int, int>(x + offset.Item1, z + offset.Item2), out Chunk neighbor))
+                    {
+                        // the direction is antisymetric: 3 - i swaps NS and EW because if we went north this chunk on south of its neighbor 
+                        neighbor.RegisterNeighbor(chunk_, (Direction) 3 - i);
+                        chunk_.RegisterNeighbor(neighbor, (Direction)i);
+                    }
+                }
             }
         }
 
@@ -181,6 +193,16 @@ public class GridControl : MonoBehaviour
                 Chunk chunk = object_.AddComponent<Chunk>();
                 chunk.Initialize(i,j);
                 chunkSortedDictionary.Add(new Tuple<int, int>(i,j), chunk);
+                for (int k = 0; k < 4; k++)
+                {
+                    Tuple<int, int> offset = GridControl.Directions[k];
+                    if (chunkSortedDictionary.TryGetValue(new Tuple<int, int>(i + offset.Item1, j + offset.Item2), out Chunk neighbor))
+                    {
+                        // the direction is antisymetric: 3 - i swaps NS and EW because if we went north this chunk on south of its neighbor 
+                        neighbor.RegisterNeighbor(chunk, (Direction)3 - k);
+                        chunk.RegisterNeighbor(neighbor, (Direction)k);
+                    }
+                }
             }
         }
     }
