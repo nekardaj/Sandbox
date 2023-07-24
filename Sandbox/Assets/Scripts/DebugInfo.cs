@@ -14,7 +14,13 @@ public class DebugInfo : MonoBehaviour
 
     void Update()
     {
+        string inventory = "";
+        for (int i = 0; i < (int)BlockType.Count; i++)
+        {
+            inventory += (BlockType)i + ": " + player.blocks[i] + "\n";
+        }
         text.text = "Position: " + player.transform.position
-            + "Chunk: " + GridControl.WorldToChunk((Vector3)player.transform.position);
+                                 + "\nChunk: " + GridControl.WorldToChunk((Vector3)player.transform.position)
+                                 + "\nBlocks:" + inventory;
     }
 }

@@ -28,7 +28,12 @@ public class Player : MonoBehaviour
 
     [SerializeField] private Camera camera;
 
-    private List<uint> blocks = new List<uint>((int)BlockType.Count);
+    // there is a collider in player layer that is used to check if the player is on the ground which should be ignored by raycasting
+    [SerializeField] private LayerMask raycastingMask;
+
+    [HideInInspector] public List<uint> blocks = new List<uint>((int)BlockType.Count);
+
+    [SerializeField] private GameObject menu;
 
     // We need to enable chunks dynamically when the player walks near them
 
@@ -36,11 +41,23 @@ public class Player : MonoBehaviour
 
     private float lastJumpPress = float.MinValue;
 
+    private float actionRange = 4.0f;
+
+    private float startedMining;
+    private GameObject minedBlock;
+    private BlockType minedType;
+
+    private int currentBlockType = 0;
+
     private Rigidbody rigidbody;
 
     void Start()
     {
-        //Cursor.lockState = CursorLockMode.Locked;
+        Cursor.lockState = CursorLockMode.Locked;
+        for (int i = 0; i < (int)BlockType.Count; i++)
+        {
+            blocks.Add(0);
+        }
         rigidbody = GetComponent<Rigidbody>();
         rigidbody.freezeRotation = true;
         // To make damping range in editor [0,1) we rescale it here
@@ -64,35 +81,94 @@ public class Player : MonoBehaviour
         camera.transform.localRotation = Quaternion.Euler(rotationY, 0, 0);
         //camera.transform.Rotate(camera.transform.right, -rotationSpeed * mouseY, Space.World);
 
-        if (Input.GetKeyDown(KeyCode.Mouse0) && Physics.Raycast(camera.transform.position, camera.transform.forward, out var hitInfo, 10f))
+        if (Input.GetKey(KeyCode.Mouse0))
         {
-            // Raycast hit some object
-            if (hitInfo.collider.gameObject.layer == GridControl.terrainLayer)
+            if (Physics.Raycast(camera.transform.position, camera.transform.forward, out var hitInfo_, actionRange, raycastingMask) && hitInfo_.collider.gameObject.layer == GridControl.terrainLayer)
             {
-                // Destroy the block
-                grid.BlockDestroyed(hitInfo.collider.gameObject.transform.position);
-                // when the player is standing on top of the block it messes up ground checking
-                // so we need to check if the player is standing on top of the block
-                // if so we need to manually decrease ground check
-                // does not always prevent this for happening, player can enjoy "flying" then
-                var diff = transform.position - hitInfo.collider.gameObject.transform.position;
-                if (diff.y < 0.52f && diff.y > 0.49f && Math.Abs(diff.x) < 0.5f && Math.Abs(diff.z) < 0.5f)
+                if (minedBlock != hitInfo_.collider.gameObject)
                 {
-                    Debug.Log("Destroyed block under player");
-                    //groundCheck -= 1; // I wanna fly
+                    startedMining = Time.time;
+                    minedBlock = hitInfo_.collider.gameObject;
+                    minedType = grid.GetTypeAt(hitInfo_.collider.gameObject.transform.position);
                 }
-                Destroy(hitInfo.collider.gameObject);
+                else
+                {
+                    if (Time.time - startedMining >= GridControl.MiningTimes[(int)minedType])
+                    {
+                        var blockMined = grid.BlockDestroyed(hitInfo_.collider.gameObject.transform.position);
+                        blocks[(int)blockMined] += 1;
+                        // when the player is standing on top of the block it messes up ground checking
+                        // so we need to check if the player is standing on top of the block
+                        // if so we need to manually decrease ground check
+                        // does not always prevent this for happening, player can enjoy "flying" then
+                        var diff = transform.position - hitInfo_.collider.gameObject.transform.position;
+                        if (diff.y < 0.52f && diff.y > 0.49f && Math.Abs(diff.x) < 0.5f && Math.Abs(diff.z) < 0.5f)
+                        {
+                            Debug.Log("Destroyed block under player");
+                            //groundCheck -= 1; // I wanna fly
+                        }
+                        Destroy(hitInfo_.collider.gameObject);
+                    }
+                }
+                // Destroy the block
+                
+            }
+            else
+            {
+                minedBlock = null;
+                minedType = BlockType.Count;
             }
         }
-        if (Input.GetKeyDown(KeyCode.Mouse1) && Physics.Raycast(camera.transform.position, camera.transform.forward, out var rayInfo, 10f))
+        else
+        {
+            minedBlock = null;
+            minedType = BlockType.Count;
+        }
+        /*
+        if ( && Physics.Raycast(camera.transform.position, camera.transform.forward, out var hitInfo, actionRange))
+        {
+            // Raycast hit some object
+            
+        }
+        */
+        if (Input.GetKeyDown(KeyCode.Mouse1) && Physics.Raycast(camera.transform.position, camera.transform.forward, out var rayInfo, actionRange, raycastingMask))
         {
             // Raycast hit some object
             if (rayInfo.collider.gameObject.layer == 8)
             {
-                // Destroy the block
-                grid.BlockDestroyed(rayInfo.collider.gameObject.transform.position);
-                Destroy(rayInfo.collider.gameObject);
+                // Create a block
+                // the new block is shifted by one unit in the direction of the normal
+                var normal = rayInfo.normal;
+                var position = rayInfo.collider.gameObject.transform.position + normal;
+                if (position.y < Chunk.ChunkHeight)
+                {
+                    grid.AddBlock(position, (BlockType)currentBlockType);
+                }
+            }
+        }
 
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (menu.activeSelf)
+            {
+                menu.SetActive(false);
+                Cursor.lockState = CursorLockMode.Locked;
+                Time.timeScale = 1;
+            }
+            else
+            {
+                menu.SetActive(true);
+                Cursor.lockState = CursorLockMode.None;
+                Time.timeScale = 0;
+            }
+        }
+
+        if (Input.mouseScrollDelta.y != 0)
+        {
+            currentBlockType = (currentBlockType + (int)Input.mouseScrollDelta.y) % (int)BlockType.Count;
+            if (currentBlockType < 0)
+            {
+                currentBlockType += (int)BlockType.Count;
             }
         }
         transform.Rotate(new Vector3(0, rotationSpeed * mouseX, 0));

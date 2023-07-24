@@ -44,7 +44,7 @@ public class GridControl : MonoBehaviour
     public static Grid grid;
 
     // chunks that are too far from player will be disabled
-    public static readonly int RenderDistance = 1;
+    public static readonly int RenderDistance = 4;
 
     public static readonly Tuple<int, int>[] Directions = new Tuple<int, int>[]
     {
@@ -54,6 +54,21 @@ public class GridControl : MonoBehaviour
         new Tuple<int, int>(-1,0),
         new Tuple<int, int>(0,-1)
     };
+
+    public static readonly float[] MiningTimes = new float[(int)BlockType.Count] // Count ensures every used block has its entry
+    {
+        1.75f,
+        1.0f,
+        0.35f
+    };
+
+    public BlockType GetTypeAt(Vector3 position)
+    {
+        var gridPosition = grid.WorldToCell(position);
+        var chunkCoords = CellToChunk(gridPosition);
+        var chunk = chunkSortedDictionary[new Tuple<int, int>(chunkCoords.x, chunkCoords.z)];
+        return chunk.GetTypeAt(gridPosition);
+    }
 
     // We need to create chunks dynamically as the player walks near them
     // The coordinates of chunks that need to be active are arbitrary(based on player movement)
@@ -99,7 +114,8 @@ public class GridControl : MonoBehaviour
     public void UpdatePosition(Vector3 position)
     {
         Vector3Int chunk = WorldToChunk(position);
-        //bedrock.transform.position = new Vector3(grid.WorldToCell(position).x, bedrock.transform.position.y, grid.WorldToCell(position).x);
+        // move bedrock under player
+        bedrock.transform.position = new Vector3(grid.WorldToCell(position).x, bedrock.transform.position.y, grid.WorldToCell(position).z);
         // disable chunk that are now too far from player and enable or instantiate new ones that are close
         void ActivateChunk(int x, int z)
         {
@@ -133,40 +149,28 @@ public class GridControl : MonoBehaviour
         {
             // disable chunks that are too far from player and enable new ones
             // this assumes player can only move one chunk at a time but since xz speed is capped it should be ok
-            if (lastChunk.x < chunk.x)
+            int offset = RenderDistance;
+            if (lastChunk.x != chunk.x)
             {
+                offset = lastChunk.x < chunk.x ? RenderDistance : -RenderDistance;
                 for (int i = lastChunk.z - RenderDistance; i <= lastChunk.z + RenderDistance; i++)
                 {
                     // disable chunk, there must be entry in dictionary since we were there and it must have been spawned
-                    chunkSortedDictionary[new Tuple<int, int>(lastChunk.x - RenderDistance, i)].gameObject.SetActive(false);
-                    ActivateChunk(chunk.x + RenderDistance, i);
+                    chunkSortedDictionary[new Tuple<int, int>(lastChunk.x - offset, i)].gameObject.SetActive(false);
+                    ActivateChunk(chunk.x + offset, i);
                 }
             }
-            if (lastChunk.x > chunk.x)
-            {
-                for (int i = lastChunk.z - RenderDistance; i <= lastChunk.z + RenderDistance; i++)
-                {
-                    chunkSortedDictionary[new Tuple<int, int>(lastChunk.x + RenderDistance, i)].gameObject.SetActive(false);
-                    ActivateChunk(chunk.x - RenderDistance, i);
-                }
-            }
-            if (lastChunk.z < chunk.z)
-            {
-                for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
-                {
-                    chunkSortedDictionary[new Tuple<int, int>(i, lastChunk.z - RenderDistance)].gameObject.SetActive(false);
-                    ActivateChunk(i, chunk.z + RenderDistance);
-                }
-            }
-            if (lastChunk.z > chunk.z)
-            {
-                for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
-                {
 
-                    chunkSortedDictionary[new Tuple<int, int>(i, lastChunk.z + RenderDistance)].gameObject.SetActive(false);
-                    ActivateChunk(i, chunk.z - RenderDistance);
+            if (lastChunk.z != chunk.z)
+            {
+                offset = lastChunk.z < chunk.z ? RenderDistance : -RenderDistance;
+                for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
+                {
+                    chunkSortedDictionary[new Tuple<int, int>(i, lastChunk.z - offset)].gameObject.SetActive(false);
+                    ActivateChunk(i, chunk.z + offset);
                 }
             }
+
             lastChunk = chunk;
             
         }
@@ -182,10 +186,11 @@ public class GridControl : MonoBehaviour
         GridElementPrefab = GridElementPrefab_;
         // At the start spawn all chunks that are within render distance
         grid = GetComponent<Grid>();
-        var position = grid.WorldToCell(player.transform.position / Chunk.ChunkSize);
-        for (int i = position.x - RenderDistance; i <= position.x + RenderDistance; i++)
+        lastChunk = WorldToChunk(player.transform.position);
+        
+        for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
         {
-            for (int j = position.z - RenderDistance; j <= position.z + RenderDistance; j++)
+            for (int j = lastChunk.z - RenderDistance; j <= lastChunk.z + RenderDistance; j++)
             {
                 GameObject object_ = new GameObject();
                 object_.layer = terrainLayer;
@@ -223,19 +228,20 @@ public class GridControl : MonoBehaviour
         return new Vector3Int((gridPosition.x - (gridPosition.x < 0 ? Chunk.ChunkSize - 1 : 0)) / Chunk.ChunkSize, gridPosition.y / Chunk.ChunkSize, (gridPosition.z - (gridPosition.z < 0 ? Chunk.ChunkSize - 1 : 0)) / Chunk.ChunkSize);
     }
 
-    public void BlockDestroyed(Vector3 position)
+    public void AddBlock(Vector3 position, BlockType blockType)
     {
         var gridPosition = grid.WorldToCell(position);
         var chunkCoords = CellToChunk(gridPosition);
         var chunk = chunkSortedDictionary[new Tuple<int, int>(chunkCoords.x, chunkCoords.z)];
-        chunk.BlockDestroyed(gridPosition);
-        /*
-        Vector3Int gridPosition = grid.WorldToCell(position);
-        // get the chunk that contains the block
-        // division rounding goes towards zero so negative numbers need offset
-        var chunk = chunkSortedDictionary[new Tuple<int, int>((gridPosition.x - (gridPosition.x < 0 ? Chunk.ChunkSize : 0)) / Chunk.ChunkSize, (gridPosition.z - (gridPosition.z < 0 ? Chunk.ChunkSize : 0)) / Chunk.ChunkSize)];
-        chunk.BlockDestroyed(gridPosition);
-        */
+        chunk.BlockPlaced(gridPosition, blockType);
+    }
+
+    public BlockType BlockDestroyed(Vector3 position)
+    {
+        var gridPosition = grid.WorldToCell(position);
+        var chunkCoords = CellToChunk(gridPosition);
+        var chunk = chunkSortedDictionary[new Tuple<int, int>(chunkCoords.x, chunkCoords.z)];
+        return chunk.BlockDestroyed(gridPosition);
     }
     // Update is called once per frame
     void Update()

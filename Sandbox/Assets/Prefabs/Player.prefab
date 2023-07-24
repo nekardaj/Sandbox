@@ -289,6 +289,10 @@ MonoBehaviour:
   dampingStopping: 0.12
   grid: {fileID: 0}
   camera: {fileID: 3166872490600050871}
+  raycastingMask:
+    serializedVersion: 2
+    m_Bits: 256
+  blocks: 
 --- !u!65 &1194321768572483300
 BoxCollider:
   m_ObjectHideFlags: 0

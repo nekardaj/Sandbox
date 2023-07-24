@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using JetBrains.Annotations;
+using Unity.Mathematics;
 using UnityEngine;
 
 public enum Direction
@@ -22,9 +23,20 @@ public class Chunk : MonoBehaviour
     public static readonly int ChunkSize = 16;
     public static readonly int ChunkHeight = 256;
 
-    private static readonly int MaxAmplitude = 16;
+    private static readonly int MaxAmplitude = 32;
     private static readonly float StartFrequency = 0.0625f;
     private static readonly int Octaves = 3;
+
+    private static int seedX;
+    private static int seedZ;
+
+    public static void InitializeSeed()
+    {
+        seedX = UnityEngine.Random.Range(0, 1 << 20);
+        seedZ = UnityEngine.Random.Range(0, 1 << 20);
+        Debug.Log("seed:" + seedX + " " + seedZ);
+    }
+
     public static int PerlinNoise(int x, int z)
     {
         int amplitude = MaxAmplitude;
@@ -32,12 +44,27 @@ public class Chunk : MonoBehaviour
         int value = 0;
         for (int i = 0; i < Octaves; i++)
         {
-            value += (int)(amplitude * Mathf.PerlinNoise(x * frequency, z * frequency));
+            //value += (int)(amplitude * Mathf.PerlinNoise(x * frequency + seedX, z * frequency + seedZ));
+            value += (int)(amplitude * Mathf.PerlinNoise((x + seedX) * frequency, (z + seedZ) * frequency));
+            //value += (int)(amplitude * Mathf.PerlinNoise(x * frequency, z * frequency));
             amplitude /= 2;
             frequency *= 2;
         }
 
         return value;
+    }
+
+    public static List<int> ConstructLayers(int x, int z)
+    {
+        int height = PerlinNoise(x, z);
+        List<int> layers = new List<int>();
+        if (height > MinimalGrassHeight)
+        {
+            int grassStart = 0;
+
+        }
+
+        return null;
     }
     private static readonly int MinimalSnowHeight = 20;
     private static readonly int MinimalGrassHeight = 8;
@@ -95,7 +122,16 @@ public class Chunk : MonoBehaviour
         }
     }
 
-    public void BlockDestroyed(Vector3Int position)
+    public BlockType GetTypeAt(Vector3Int position)
+    {
+        int x = position.x - this.x * ChunkSize;
+        int z = position.z - this.z * ChunkSize;
+        // notify the column
+        Column column = columns[x, z];
+        return column.GetTypeAt(position);
+    }
+
+    public BlockType BlockDestroyed(Vector3Int position)
     {
         // calculate relative position in chunk
         modified = true;
@@ -103,11 +139,6 @@ public class Chunk : MonoBehaviour
         int z = position.z - this.z * ChunkSize;
         // notify the column
         Column column = columns[x, z];
-        if (column.GetType() == typeof(Column))
-        {
-            //columns[x,z] = column.Deconstruct()
-        }
-        column.BlockDestroyed(position.x, position.y, position.z, this, BlockType.Count);
         for (int i = 0; i < 4; i++)
         {
             Tuple<int, int> offset = GridControl.Directions[i];
@@ -133,10 +164,16 @@ public class Chunk : MonoBehaviour
                 }
             }
         }
+        return column.BlockReplaced(position.x, position.y, position.z, this, BlockType.Count);
     }
-    public void BlockPlaced()
+    public void BlockPlaced(Vector3Int position, BlockType blockType)
     {
         modified = true;
+        int x = position.x - this.x * ChunkSize;
+        int z = position.z - this.z * ChunkSize;
+        // notify the column
+        Column column = columns[x, z];
+        _ = column.BlockReplaced(position.x, position.y, position.z, this, blockType);
     }
 
     private int x;
@@ -195,12 +232,38 @@ public class Column
         gridElement.transform.parent = chunk.transform;
     }
 
+    public BlockType GetTypeAt(Vector3Int position)
+    {
+        if (layerHeights == null)
+        {
+            int i = 0;
+            while (layerList[i] < position.y)
+            {
+                i++;
+            }
+            return (BlockType)i;
+        }
+
+        if (layerHeights != null)
+        {
+            foreach (var pair in layerHeights)
+            {
+                if (pair.Key >= position.y)
+                {
+                    return pair.Value;
+                }
+            }
+        }
+        throw new ArgumentException("The block does not exist anymore");
+    }
+
     /// <summary>
-    /// When block is destroyed in a column this method updates layers and spawns blocks if needed, I plan to use it for spawning blocks as well
+    /// When block is replaced in a column this method updates layers and spawns blocks if needed
     /// </summary>
     /// <param name="chunk">parent chunk</param>
     /// <param name="newBlock">Type of the block being put in, this allows using the method for placing blocks as well</param>
-    public void BlockDestroyed(int x, int y, int z, Chunk chunk, BlockType newBlock)
+    /// <returns>Type of block that was destroyed, empty type if block was placed</returns>
+    public BlockType BlockReplaced(int x, int y, int z, Chunk chunk, BlockType newBlock)
     {
         BlockType destroyedBlock = BlockType.Count;
         BlockType blockUnder = BlockType.Count;
@@ -210,30 +273,20 @@ public class Column
             blocks.Remove(y);
         }
 
+
         if (layerHeights == null) // column was not modified before - change representation
         {
-            int i;
-            for (i = 0; i < layerList.Count; i++)
-            {
-                if (layerList[i] >= y)
-                {
-                    destroyedBlock = (BlockType)i;
-                    break;
-                }
-            }
-            if (layerList[i] >= y - 1)
-            {
-
-            }
             Reconstruct();
             layerList = null;
         }
+
         // if we are placing a block the last layer can be much lower than y - 1 causing edge cases
         // adding new layer of air fixes this
-        if (newBlock != BlockType.Count && layerHeights.Max().Key < y - 1)
+        if (newBlock != BlockType.Count && layerHeights.Keys.Max() < y)
         {
             layerHeights.Add(y, BlockType.Count);
         }
+
         // determine parameters of the layers affected
 
         // there are two cases: both destroyed block and the one under it are in the same layer or not
@@ -302,7 +355,7 @@ public class Column
         }
         
         // Spawn the new blocks if needed
-        if (!blocks.ContainsKey(y - 1) && blockUnder != BlockType.Count) // block under this one was not spawned and were destroying
+        if (blockUnder != BlockType.Count && newBlock == BlockType.Count && !blocks.ContainsKey(y - 1) ) // block under this one was not spawned and were destroying
         {
             CreateBlock(y - 1, blockUnder, chunk);
         }
@@ -310,7 +363,7 @@ public class Column
         {
             CreateBlock(y, newBlock, chunk);
         }
-        if (!blocks.ContainsKey(y + 1) && blockAbove != BlockType.Count)
+        if (newBlock == BlockType.Count && blockAbove != BlockType.Count && !blocks.ContainsKey(y + 1) )
         {
             CreateBlock(y + 1, blockAbove, chunk);
         }
@@ -336,8 +389,7 @@ public class Column
         {
             layerHeights.Remove(key);
         }
-        
-
+        return destroyedBlock;
     }
 
     /// <summary>
