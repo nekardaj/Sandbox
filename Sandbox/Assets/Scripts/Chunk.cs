@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Data;
+using System.Linq;
 using JetBrains.Annotations;
 using UnityEngine;
 
@@ -82,12 +84,13 @@ public class Chunk : MonoBehaviour
     {
         this.x = x;
         this.z = z;
+        modified = false;
         columns = new Column[ChunkSize,ChunkSize];
         for (int i = 0; i < ChunkSize; i++)
         {
             for (int j = 0; j < ChunkSize; j++)
             {
-                columns[i,j] = new UnmodifiedColumn(x * ChunkSize + i, z * ChunkSize + j, this);
+                columns[i,j] = new Column(x * ChunkSize + i, z * ChunkSize + j, this);
             }
         }
     }
@@ -100,18 +103,18 @@ public class Chunk : MonoBehaviour
         int z = position.z - this.z * ChunkSize;
         // notify the column
         Column column = columns[x, z];
-        if (column.GetType() == typeof(UnmodifiedColumn))
+        if (column.GetType() == typeof(Column))
         {
             //columns[x,z] = column.Deconstruct()
         }
-        column.BlockDestroyed(position.x, position.y, position.z, this);
+        column.BlockDestroyed(position.x, position.y, position.z, this, BlockType.Count);
         for (int i = 0; i < 4; i++)
         {
             Tuple<int, int> offset = GridControl.Directions[i];
             var neighbor = new Tuple<int,int>(x + offset.Item1, z + offset.Item2);
             if (neighbor.Item1 >= 0 && neighbor.Item1 < ChunkSize && neighbor.Item2 >= 0 && neighbor.Item2 < ChunkSize)
             {
-                columns[neighbor.Item1, neighbor.Item2].NeighborDestroyed(position.x + offset.Item1,position.y,position.z + offset.Item2, this);
+                columns[neighbor.Item1, neighbor.Item2].NeighborDestroyed(position.y, this);
             }
             else
             {
@@ -120,26 +123,32 @@ public class Chunk : MonoBehaviour
                 // only one coordinate is out of bounds
                 if (neighbor.Item1 < 0 || neighbor.Item1 >= ChunkSize)
                 {
-                    neighbors[i].columns[neighbor.Item1 > ChunkSize ? 0 : (ChunkSize - 1),z].NeighborDestroyed(position.x + offset.Item1, position.y, position.z + offset.Item2, neighbors[i]);
+                    //
+                    neighbors[i].columns[neighbor.Item1 >= ChunkSize ? 0 : (ChunkSize - 1), z].NeighborDestroyed(position.y, neighbors[i]);
                 }
                 else
                 {
-                    neighbors[i].columns[x, neighbor.Item2 > ChunkSize ? 0 : (ChunkSize - 1)].NeighborDestroyed(position.x + offset.Item1, position.y, position.z + offset.Item2, neighbors[i]);
+                    //
+                    neighbors[i].columns[x, neighbor.Item2 >= ChunkSize ? 0 : (ChunkSize - 1)].NeighborDestroyed(position.y, neighbors[i]);
                 }
             }
         }
     }
-
     public void BlockPlaced()
     {
-
+        modified = true;
     }
 
     private int x;
     private int z;
 
     private Column[,] columns = new Column[ChunkSize, ChunkSize];
-    private bool modified = false;
+
+    public bool modified
+    {
+        get;
+        private set;
+    }
 
 }
 
@@ -149,90 +158,231 @@ public class Chunk : MonoBehaviour
 // if chunk was not modified by the player we can optimize by spawning only top layer
 // and any blocks that are not covered by other blocks from all directions
 
-public abstract class Column
-{
-    // y coord is enough?
-    // block destruction forces an instantiation of a new block
-    // so adding some information to it wont be a problem (eg a bitmask)
 
-    /// <summary>
-    /// When a block is destroyed usually new one becomes visible and must be instantiated
-    /// We need to set the parent to chunk so disabling works, so we need to pass the reference
-    /// </summary>
-    /// <param name="chunk">Chunk owning this column</param>
-    public abstract void BlockDestroyed(int x, int y, int z, Chunk chunk);
-    public abstract void BlockPlaced(int x, int y, int z, Chunk chunk);
-    public abstract void NeighborDestroyed(int x, int y, int z, Chunk chunk);
-    /*
-    // because all neighbors are not instantiated during constructor of column we need to check which blocks to spawn after
-    public abstract void Update()
-    {
+// Before the column is modified it should behave differently(and be memory efficient)
+// But having two different classes brings new problems so instead I will put both List(unmodified state) and SortedDictionary(modified) in the same class
+// Which only wastes one pointer
+// If the column was not modified by player we only need to remember few values
+// Almost everything can be calculated from scratch because the terrain generation is deterministic
+// but caching some information helps and uses very little memory compared to modified columns
 
-    }
-    */
-}
 
 /// <summary>
-/// If the column was not modified by player we only need to remember few values
-/// Almost everything can be calculated from scratch because the terrain generation is deterministic
-/// but caching some information helps and uses very little memory compared to modified columns
+/// Class holding the data about one column
+/// Until it is modified only list of layer heights is used
+/// After modification the list is converted to SortedDictionary to allow faster lookup and modifications
 /// </summary>
-public class UnmodifiedColumn : Column
+public class Column
 {
     // instantiate needs some transform as an argument
     private static Transform transform = new GameObject().transform;
-    public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="y">Y coordinate of destroyed block</param>
+    private void UpdateLayers(int y)
     {
-        if (!blocks.ContainsKey(y - 1))
+
+    }
+
+    private void CreateBlock(int y, BlockType blockType, Chunk chunk)
+    {
+        GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)blockType], transform);
+        gridElement.name = "GridElement_" + x + "," + z;
+        gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, y, z));
+        blocks.Add(y, gridElement);
+        gridElement.transform.parent = chunk.transform;
+    }
+
+    /// <summary>
+    /// When block is destroyed in a column this method updates layers and spawns blocks if needed, I plan to use it for spawning blocks as well
+    /// </summary>
+    /// <param name="chunk">parent chunk</param>
+    /// <param name="newBlock">Type of the block being put in, this allows using the method for placing blocks as well</param>
+    public void BlockDestroyed(int x, int y, int z, Chunk chunk, BlockType newBlock)
+    {
+        BlockType destroyedBlock = BlockType.Count;
+        BlockType blockUnder = BlockType.Count;
+
+        if (newBlock == BlockType.Count)
         {
-            GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, y - 1, z)], transform);
-            gridElement.name = "GridElement_" + x + "," + z;
-            gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, y - 1, z));
-            blocks.Add(y - 1, gridElement);
-            gridElement.transform.parent = chunk.transform; // all chunks have 0,0,0 as their position
+            blocks.Remove(y);
         }
-        blocks.Remove(y);
+
+        if (layerHeights == null) // column was not modified before - change representation
+        {
+            int i;
+            for (i = 0; i < layerList.Count; i++)
+            {
+                if (layerList[i] >= y)
+                {
+                    destroyedBlock = (BlockType)i;
+                    break;
+                }
+            }
+            if (layerList[i] >= y - 1)
+            {
+
+            }
+            Reconstruct();
+            layerList = null;
+        }
+        // if we are placing a block the last layer can be much lower than y - 1 causing edge cases
+        // adding new layer of air fixes this
+        if (newBlock != BlockType.Count && layerHeights.Max().Key < y - 1)
+        {
+            layerHeights.Add(y, BlockType.Count);
+        }
+        // determine parameters of the layers affected
+
+        // there are two cases: both destroyed block and the one under it are in the same layer or not
+        // if they are in the same layer we need to make the layer go one block lower add empty one and continue with the one of destroyed block if needed
+        int layerUnder = 0;
+        var enumerator = layerHeights.GetEnumerator();
+        while (enumerator.MoveNext())
+        {
+            if (enumerator.Current.Key >= y - 1) // layer below the destroyed block
+            {
+                layerUnder = enumerator.Current.Key;
+                blockUnder = enumerator.Current.Value;
+                break;
+            }
+        }
+
+        int currentLayer;
+        BlockType blockAbove = BlockType.Count;
+        if (enumerator.Current.Key >= y) // layer below the destroyed block is same
+        {
+            currentLayer = enumerator.Current.Key;
+            destroyedBlock = enumerator.Current.Value;
+        }
+        else
+        {
+            enumerator.MoveNext();
+            currentLayer = enumerator.Current.Key;
+            destroyedBlock = enumerator.Current.Value;
+        }
+
+        if (newBlock == BlockType.Count && enumerator.Current.Key > y) // if block is being destroyed we might need to spawn block above it
+        {
+            blockAbove = enumerator.Current.Value;
+        }
+        else
+        {
+            if (enumerator.MoveNext())
+            {
+                blockAbove = enumerator.Current.Value;
+            }
+            // no layer is above the destroyed block
+        }
+        
+        enumerator.Dispose();
+
+        // update the layers
+        if (blockUnder == destroyedBlock)
+        {
+            //the layer ends with destroyed block
+            if (currentLayer == y)
+            {
+                layerHeights[currentLayer] = newBlock; //old layer is replaced with new one
+                // shrink the layer by one
+                layerHeights.Add(layerUnder - 1, blockUnder);
+            }
+            else
+            {
+                // layer ends with block under destroyed block
+                layerHeights[y] = newBlock;
+                layerHeights.Add(y - 1, blockUnder);
+            }
+        }
+        else
+        {
+            layerHeights[y] = newBlock;
+        }
+        
+        // Spawn the new blocks if needed
+        if (!blocks.ContainsKey(y - 1) && blockUnder != BlockType.Count) // block under this one was not spawned and were destroying
+        {
+            CreateBlock(y - 1, blockUnder, chunk);
+        }
+        if (newBlock != BlockType.Count) // placing block
+        {
+            CreateBlock(y, newBlock, chunk);
+        }
+        if (!blocks.ContainsKey(y + 1) && blockAbove != BlockType.Count)
+        {
+            CreateBlock(y + 1, blockAbove, chunk);
+        }
+
+        // merge neighboring layers of same type
+        List<int> keysToRemove = new List<int>();
+        BlockType previousType = BlockType.Count;
+        enumerator = layerHeights.GetEnumerator();
+        enumerator.MoveNext();
+        previousType = enumerator.Current.Value;
+        int previousKey = enumerator.Current.Key;
+        while (enumerator.MoveNext())
+        {
+            if (enumerator.Current.Value == previousType)
+            {
+                keysToRemove.Add(previousKey);
+            }
+            previousType = enumerator.Current.Value;
+            previousKey = enumerator.Current.Key;
+        }
+        enumerator.Dispose();
+        foreach (var key in keysToRemove)
+        {
+            layerHeights.Remove(key);
+        }
+        
+
     }
 
     /// <summary>
     /// Convert data to modified column and return it
     /// </summary>
-    /// <returns>This column data represented by ModifiedColumn class</returns>
-    public ModifiedColumn Construct()
+    public void Reconstruct()
     {
         //ModifiedColumn column = new ModifiedColumn(x, z);
-        SortedDictionary<int, BlockType> layers = new SortedDictionary<int, BlockType>();
-        for (int i = 0; i < layerHeight.Count; i++)
+        layerHeights = new SortedDictionary<int, BlockType>();
+        for (int i = 0; i < layerList.Count; i++)
         {
             // Since there are as many layers as types of blocks we can cast index to BlockType to get the type
-            layers.Add(layerHeight[i], (BlockType)i);
+            layerHeights.Add(layerList[i], (BlockType)i);
         }
-
-        ModifiedColumn newColumn = new ModifiedColumn(x, z, blocks, layers);
-        //indexof key
-        // .keys property and use binary search to find upper bound
-        //return column;
-        // keep it simple, this does not happen often
-        return null;
     }
-    public override void BlockPlaced(int x, int z, int y, Chunk chunk)
+    public void BlockPlaced(int x, int z, int y, Chunk chunk)
     {
         
     }
 
-    public override void NeighborDestroyed(int x, int y, int z, Chunk chunk)
+    public void NeighborDestroyed(int y, Chunk chunk)
     {
-        if (Chunk.PerlinNoise(x,z) >= y && !blocks.ContainsKey(y))
+        if (layerHeights == null && Chunk.PerlinNoise(x,z) >= y && !blocks.ContainsKey(y))
         {
-            GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, y, z)], transform);
-            gridElement.name = "GridElement_" + x + "," + z;
-            gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, y, z));
-            blocks.Add(y, gridElement);
-            gridElement.transform.parent = chunk.transform; // all chunks have 0,0,0 as their position
+            CreateBlock(y, Chunk.GetBlockType(x, y, z), chunk);
+        }
+
+        if (layerHeights != null && !blocks.ContainsKey(y))
+        {
+            foreach (var pair in layerHeights)
+            {
+                if (pair.Key >= y)
+                {
+                    if (pair.Value == BlockType.Count)
+                    {
+                        break;
+                    }
+                    CreateBlock(y, pair.Value, chunk);
+                    break;
+                }
+            }
         }
     }
 
-    public UnmodifiedColumn(int x, int z, Chunk chunk)
+    public Column(int x, int z, Chunk chunk)
     {
         this.x = x;
         this.z = z;
@@ -243,20 +393,29 @@ public class UnmodifiedColumn : Column
             minNeigbor = Math.Min(Chunk.PerlinNoise(x + offset.Item1, z + offset.Item2), minNeigbor);
         }
         // top block of new chunk can always be seen
-        int height = Chunk.PerlinNoise(x, z);
-        GameObject gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, height, z)], transform);
-        gridElement.name = "GridElement_" + x + "," + height + "," + z;
-        gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, height, z));
-        gridElement.transform.parent = chunk.gameObject.transform;
-        blocks.Add(height, gridElement);
+        height = Chunk.PerlinNoise(x, z);
+        if (height <= 10)
+        {
+            layerList = new List<int>() { height };
+        }
+        else
+        {
+            if (height <= 19)
+            {
+                layerList = new List<int>() { 10, height};
+            }
+            else
+            {
+                layerList = new List<int>() { 10, 19, height };
+            }
+        }
+        
+        
+        CreateBlock(height, Chunk.GetBlockType(x,height,z), chunk);
         // top block must always be spawned, others depend on neighbors
         for (int i = height - 1; i > minNeigbor; i--)
         {
-            gridElement = GameObject.Instantiate(GridControl.GridElementPrefab[(int)Chunk.GetBlockType(x, i, z)], transform);
-            gridElement.name = "GridElement_" + x + "," + i + "," + z;
-            gridElement.transform.position = GridControl.grid.GetCellCenterWorld(new Vector3Int(x, i, z));
-            gridElement.transform.parent = chunk.gameObject.transform;
-            blocks.Add(i, gridElement);
+            CreateBlock(i, Chunk.GetBlockType(x, i, z), chunk);
         }
     }
 
@@ -265,39 +424,9 @@ public class UnmodifiedColumn : Column
     public int height;
     // having entry for every spawned cube is not ideal however spawning the Game Object is bigger compared to one entry
     private SortedDictionary<int, GameObject> blocks = new SortedDictionary<int, GameObject>();
-    public List<int> layerHeight = new List<int>((int)BlockType.Count);
-
-
-}
-
-public class ModifiedColumn : Column
-{
-    public ModifiedColumn(int x, int z, SortedDictionary<int, GameObject> blocks_, SortedDictionary<int, BlockType> layers_)
-    {
-        this.x = x;
-        this.z = z;
-        blocks = blocks_;
-        layerHeights = layers_;
-    }
 
     private SortedDictionary<int, BlockType> layerHeights;
-    private int x;
-    private int z;
-    public override void BlockDestroyed(int x, int y, int z, Chunk chunk)
-    {
-        throw new System.NotImplementedException();
-    }
-    public override void NeighborDestroyed(int x, int y, int z, Chunk chunk)
-    {
-        throw new NotImplementedException();
-    }
+    public List<int> layerList = new List<int>((int)BlockType.Count);
 
-    // add list of tuples height and type of block to save memory
-    // worst case it is twice as much as if saving 256 enum entries but in most cases it will be much less
 
-    private SortedDictionary<int, GameObject> blocks = new SortedDictionary<int, GameObject>();
-    public override void BlockPlaced(int x, int y, int z, Chunk chunk)
-    {
-        throw new System.NotImplementedException();
-    }
 }

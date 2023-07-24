@@ -6,7 +6,7 @@ using UnityEngine;
 
 public enum BlockType { Rock, Grass, Snow, Count }
 // trick that allows using block type as an index in an array, even when new types are inserted before Count everything will work
-
+// layer of type Count means empty space
 
 
 

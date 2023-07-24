@@ -14,6 +14,7 @@ public class DebugInfo : MonoBehaviour
 
     void Update()
     {
-        text.text = "Position: " + player.transform.position;
+        text.text = "Position: " + player.transform.position
+            + "Chunk: " + GridControl.WorldToChunk((Vector3)player.transform.position);
     }
 }
