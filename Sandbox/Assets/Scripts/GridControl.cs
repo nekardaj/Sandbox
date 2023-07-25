@@ -38,9 +38,6 @@ public class GridControl : MonoBehaviour
 
     private Vector3Int lastChunk;
 
-    private int gridHeight = 4;
-    
-
     public static Grid grid;
 
     // chunks that are too far from player will be disabled
@@ -156,7 +153,15 @@ public class GridControl : MonoBehaviour
                 for (int i = lastChunk.z - RenderDistance; i <= lastChunk.z + RenderDistance; i++)
                 {
                     // disable chunk, there must be entry in dictionary since we were there and it must have been spawned
-                    chunkSortedDictionary[new Tuple<int, int>(lastChunk.x - offset, i)].gameObject.SetActive(false);
+                    var key = new Tuple<int, int>(lastChunk.x - offset, i);
+                    if (!chunkSortedDictionary.ContainsKey(key))
+                    {
+                        Debug.Log("Missing chunk " + key);
+                    }
+                    else
+                    {
+                        chunkSortedDictionary[key].gameObject.SetActive(false);
+                    }
                     ActivateChunk(chunk.x + offset, i);
                 }
             }
@@ -166,7 +171,15 @@ public class GridControl : MonoBehaviour
                 offset = lastChunk.z < chunk.z ? RenderDistance : -RenderDistance;
                 for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
                 {
-                    chunkSortedDictionary[new Tuple<int, int>(i, lastChunk.z - offset)].gameObject.SetActive(false);
+                    var key = new Tuple<int, int>(i, lastChunk.z - offset);
+                    if (!chunkSortedDictionary.ContainsKey(key))
+                    {
+                        Debug.Log("Missing chunk " + key);
+                    }
+                    else
+                    {
+                        chunkSortedDictionary[key].gameObject.SetActive(false);
+                    }
                     ActivateChunk(i, chunk.z + offset);
                 }
             }

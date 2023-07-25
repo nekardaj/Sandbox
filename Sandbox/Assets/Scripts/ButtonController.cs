@@ -27,7 +27,13 @@ public class ButtonController : MonoBehaviour
             {
                 UnityEngine.Random.InitState(seed);
             }
+            else
+            {
+                // If user does not enter a valid seed, use the current time as a seed
+                UnityEngine.Random.InitState(System.DateTime.Now.Millisecond);
+            }
             Chunk.InitializeSeed();
+            Time.timeScale = 1.0f;
             SceneManager.LoadScene(1);
         }
         else if (action == UIAction.Quit)

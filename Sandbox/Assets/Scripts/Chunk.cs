@@ -6,6 +6,7 @@ using System.Linq;
 using JetBrains.Annotations;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 public enum Direction
 {
@@ -23,18 +24,20 @@ public class Chunk : MonoBehaviour
     public static readonly int ChunkSize = 16;
     public static readonly int ChunkHeight = 256;
 
-    private static readonly int MaxAmplitude = 32;
-    private static readonly float StartFrequency = 0.0625f;
-    private static readonly int Octaves = 3;
+    private static readonly int MaxAmplitude = 64;
+    private static readonly float StartFrequency = 0.0078125f; // 1/64 
+    private static readonly int Octaves = 4;
+    private static readonly int BaseHeight = 96; // corresponds to the height of zero level in the world (blocks above bedrock)
+    // it should be around twice the maximal amplitude of the noise to make sure that the noise is always positive
 
-    private static int seedX;
-    private static int seedZ;
+    private static int SeedX;
+    private static int SeedZ;
 
     public static void InitializeSeed()
     {
-        seedX = UnityEngine.Random.Range(0, 1 << 20);
-        seedZ = UnityEngine.Random.Range(0, 1 << 20);
-        Debug.Log("seed:" + seedX + " " + seedZ);
+        SeedX = UnityEngine.Random.Range(0, 1 << 20);
+        SeedZ = UnityEngine.Random.Range(0, 1 << 20);
+        Debug.Log("seed:" + SeedX + " " + SeedZ);
     }
 
     public static int PerlinNoise(int x, int z)
@@ -44,55 +47,62 @@ public class Chunk : MonoBehaviour
         int value = 0;
         for (int i = 0; i < Octaves; i++)
         {
-            //value += (int)(amplitude * Mathf.PerlinNoise(x * frequency + seedX, z * frequency + seedZ));
-            value += (int)(amplitude * Mathf.PerlinNoise((x + seedX) * frequency, (z + seedZ) * frequency));
-            //value += (int)(amplitude * Mathf.PerlinNoise(x * frequency, z * frequency));
+            float noise = Mathf.PerlinNoise(SeedX + x * frequency, SeedZ + z * frequency);
+            value += (int)(amplitude * noise);
             amplitude /= 2;
             frequency *= 2;
         }
 
-        return value;
+        return BaseHeight + value;
     }
 
     public static List<int> ConstructLayers(int x, int z)
     {
         int height = PerlinNoise(x, z);
-        List<int> layers = new List<int>();
-        if (height > MinimalGrassHeight)
+        List<int> layerList = new List<int>();
+        if (height <= MinimalGrassHeight)
         {
-            int grassStart = 0;
-
-        }
-
-        return null;
-    }
-    private static readonly int MinimalSnowHeight = 20;
-    private static readonly int MinimalGrassHeight = 8;
-    private static readonly int NormalGrassLayer = 4;
-    /// <summary>
-    /// Using only height to determine block type would look bad
-    /// So I am going use fixed grass and snow layer width and add some noise to it 
-    /// </summary>
-    /// <param name="x"></param>
-    /// <param name="y"></param>
-    /// <param name="z"></param>
-    /// <returns></returns>
-    public static BlockType GetBlockType(int x, int y, int z)
-    {
-        //int height = PerlinNoise(x, z);
-        if (y > 19)
-        {
-            return BlockType.Snow;
-        }
-        else if (y > 10)
-        {
-            return BlockType.Grass;
+            layerList = new List<int>() { height };
         }
         else
         {
-            return BlockType.Rock;
+            int displacement = (int)(1.5f * Mathf.PerlinNoise(x * SnowFrequency + SeedX, z * SnowFrequency + SeedZ)); // add some noise so there isnt flat border
+            //displacement = 0;
+            if (height <= MinimalSnowHeight)
+            {
+                layerList = new List<int>() { MinimalGrassHeight, height };
+            }
+            else
+            {
+                // snow layer should not be too thick
+                if (height - NormalSnowLayer < MinimalSnowHeight)
+                {
+                    if (height - MinimalSnowHeight - displacement == 1)
+                    {
+                        //there would be only one block of snow, ignore it
+                        layerList = new List<int>() { MinimalGrassHeight, height };
+                    }
+                    else
+                    {
+                        layerList = new List<int>() { MinimalGrassHeight, MinimalSnowHeight + displacement, height };
+                    }
+                }
+                else
+                {
+                    layerList = new List<int>() { MinimalGrassHeight, height - NormalSnowLayer + displacement, height };
+                }
+                
+            }
         }
+
+        return layerList;
     }
+
+    private static readonly float SnowFrequency = 0.03125f;
+    private static readonly int NormalSnowLayer = 4;
+    private static readonly int NormalGrassLayer = 4;
+    private static readonly int MinimalSnowHeight = 68 + BaseHeight;
+    private static readonly int MinimalGrassHeight = 22 + BaseHeight;
 
     // another optimization might be to disable chunks that are not visible to the player
     // eg using heuristic using lowest and highest block in the chunk
@@ -405,16 +415,17 @@ public class Column
             layerHeights.Add(layerList[i], (BlockType)i);
         }
     }
-    public void BlockPlaced(int x, int z, int y, Chunk chunk)
-    {
-        
-    }
 
     public void NeighborDestroyed(int y, Chunk chunk)
     {
         if (layerHeights == null && Chunk.PerlinNoise(x,z) >= y && !blocks.ContainsKey(y))
         {
-            CreateBlock(y, Chunk.GetBlockType(x, y, z), chunk);
+            int i = 0;
+            while (layerList[i] < y)
+            {
+                i++;
+            }
+            CreateBlock(y, (BlockType)i, chunk);
         }
 
         if (layerHeights != null && !blocks.ContainsKey(y))
@@ -445,29 +456,24 @@ public class Column
             minNeigbor = Math.Min(Chunk.PerlinNoise(x + offset.Item1, z + offset.Item2), minNeigbor);
         }
         // top block of new chunk can always be seen
-        height = Chunk.PerlinNoise(x, z);
-        if (height <= 10)
-        {
-            layerList = new List<int>() { height };
-        }
-        else
-        {
-            if (height <= 19)
-            {
-                layerList = new List<int>() { 10, height};
-            }
-            else
-            {
-                layerList = new List<int>() { 10, 19, height };
-            }
-        }
         
-        
-        CreateBlock(height, Chunk.GetBlockType(x,height,z), chunk);
+        layerList = Chunk.ConstructLayers(x, z);
+        height = layerList[layerList.Count - 1];
+        int layer = 0;
+        while (layerList[layer] < height)
+        {
+            layer++;
+        }
+        CreateBlock(height, (BlockType)layer, chunk);
         // top block must always be spawned, others depend on neighbors
         for (int i = height - 1; i > minNeigbor; i--)
         {
-            CreateBlock(i, Chunk.GetBlockType(x, i, z), chunk);
+            layer = 0;
+            while (layerList[layer] < i)
+            {
+                layer++;
+            }
+            CreateBlock(i, (BlockType)layer, chunk);
         }
     }
 
