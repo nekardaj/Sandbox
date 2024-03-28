@@ -273,6 +273,11 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 16810596}
   m_CullTransparentMesh: 1
+--- !u!1 &167924887 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 3166872490852235094, guid: 9f4d7a4a1ca4bd14e9a7defc9b301176, type: 3}
+  m_PrefabInstance: {fileID: 3166872490719124932}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &184577888
 GameObject:
   m_ObjectHideFlags: 0
@@ -503,12 +508,25 @@ MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 3166872490852235090, guid: 9f4d7a4a1ca4bd14e9a7defc9b301176, type: 3}
   m_PrefabInstance: {fileID: 3166872490719124932}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
+  m_GameObject: {fileID: 167924887}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f4878c4090caa44c8d963071ac13adc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!65 &383051966
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 167924887}
+  m_Material: {fileID: 0}
+  m_IsTrigger: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Size: {x: 0.5, y: 0.025, z: 0.5}
+  m_Center: {x: 0, y: -0.94, z: 0}
 --- !u!1 &485936328
 GameObject:
   m_ObjectHideFlags: 0
@@ -567,9 +585,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   GridElementPrefab_:
+  - {fileID: 5987654255856237280, guid: cff1c37b1f3042d4fa2f431406408da3, type: 3}
+  - {fileID: 5987654255856237280, guid: ea40184db1862b14fa4e991af2016490, type: 3}
+  - {fileID: 5987654255856237280, guid: fd1cdf20d68aba645ac7a9966558856b, type: 3}
+  - {fileID: 5987654255856237280, guid: 56461b2de635e0f47b08e98bec0e6bbc, type: 3}
+  - {fileID: 5987654255856237280, guid: 76661b7f307119c4faaf96137e769d7d, type: 3}
+  - {fileID: 5987654255856237280, guid: 160f715466349ae4f96842b9444d1a58, type: 3}
+  - {fileID: 5987654255856237280, guid: d8879c16ff91d7f46bb9f18c809e9da9, type: 3}
+  - {fileID: 5987654255856237280, guid: c099998e1624d76459ba74aff2628991, type: 3}
   - {fileID: 5987654255856237280, guid: a12c8a8b22b7fd14c906fe61bee688a2, type: 3}
-  - {fileID: 5987654255856237280, guid: a2b8bf9f7aaa5ea479a0d749cc882379, type: 3}
+  - {fileID: 5987654255856237280, guid: f830cae0c60c26047a5eedb8aac8cad8, type: 3}
+  - {fileID: 5987654255856237280, guid: c8d11f9859f558a4a9a63c8ea55b41f4, type: 3}
   - {fileID: 5987654255856237280, guid: 4025a7e1210feca4da3464d79f68b0b6, type: 3}
+  - {fileID: 5987654255856237280, guid: a2b8bf9f7aaa5ea479a0d749cc882379, type: 3}
   gridSize: {x: 128, y: 1, z: 128}
   player: {fileID: 383051961}
   bedrock: {fileID: 1339383094}

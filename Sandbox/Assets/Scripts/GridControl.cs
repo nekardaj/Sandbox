@@ -1,10 +1,27 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
-public enum BlockType { Rock, Grass, Snow, Count }
+// Blocks will be in the same order as in biome type so we can use either for indexing
+public enum BlockType {
+    TundraDefault,
+    TaigaDefault,
+    TemperateGrasslandDefault,
+    TermperateForestDefault,
+    TropicalSeasonalForestDefault,
+    DesertDefault,
+    SavannaDefault,
+    TropicalRainforestDefault,
+    Rock, // Mountain
+    DeepWater,
+    ShallowWater,
+    Snow,
+    Grass,
+    Count
+}
 // trick that allows using block type as an index in an array, even when new types are inserted before Count everything will work
 // layer of type Count means empty space
 
@@ -41,7 +58,7 @@ public class GridControl : MonoBehaviour
     public static Grid grid;
 
     // chunks that are too far from player will be disabled
-    public static readonly int RenderDistance = 4;
+    public static readonly int RenderDistance = 1;
 
     public static readonly Tuple<int, int>[] Directions = new Tuple<int, int>[]
     {
@@ -54,9 +71,19 @@ public class GridControl : MonoBehaviour
 
     public static readonly float[] MiningTimes = new float[(int)BlockType.Count] // Count ensures every used block has its entry
     {
+        1.0f,
+        1.0f,
+        1.0f,
+        1.0f,
+        1.0f,
+        1.0f,
+        1.0f,
         1.75f,
         1.0f,
-        0.35f
+        1.0f,
+        1.0f,
+        0.5f,
+        1.0f,
     };
 
     public BlockType GetTypeAt(Vector3 position)
@@ -200,17 +227,18 @@ public class GridControl : MonoBehaviour
         // At the start spawn all chunks that are within render distance
         grid = GetComponent<Grid>();
         lastChunk = WorldToChunk(player.transform.position);
-        
+
         for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
         {
             for (int j = lastChunk.z - RenderDistance; j <= lastChunk.z + RenderDistance; j++)
             {
+                Debug.Log("Spawning chunk " + i + "," + j);
                 GameObject object_ = new GameObject();
                 object_.layer = terrainLayer;
                 object_.name = "Chunk_" + i + "," + j;
                 Chunk chunk = object_.AddComponent<Chunk>();
-                chunk.Initialize(i,j);
-                chunkSortedDictionary.Add(new Tuple<int, int>(i,j), chunk);
+                chunk.Initialize(i, j);
+                chunkSortedDictionary.Add(new Tuple<int, int>(i, j), chunk);
                 for (int k = 0; k < 4; k++)
                 {
                     Tuple<int, int> offset = GridControl.Directions[k];

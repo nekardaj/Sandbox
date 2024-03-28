@@ -1,0 +1,3 @@
+[submodule "Sandbox/Assets/Scripts/TerrainGeneration"]
+	path = Sandbox/Assets/Scripts/TerrainGeneration
+	url = https://github.com/nekardaj/TerrainGenerationPCG.git

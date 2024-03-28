@@ -4,7 +4,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using JetBrains.Annotations;
+using NoiseLibrary;
+using TerrainGenerationPCG;
 using Unity.Mathematics;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -26,12 +29,17 @@ public class Chunk : MonoBehaviour
 
     private static readonly int MaxAmplitude = 64;
     private static readonly float StartFrequency = 0.0078125f; // 1/64 
-    private static readonly int Octaves = 4;
+    private static readonly int Octaves = 3;
     private static readonly int BaseHeight = 96; // corresponds to the height of zero level in the world (blocks above bedrock)
     // it should be around twice the maximal amplitude of the noise to make sure that the noise is always positive
 
     private static int SeedX;
     private static int SeedZ;
+
+    private static readonly int LayerHeightDisplacemntAmplitude = 3;
+    private static readonly int BaseLayerThickness = 4;
+
+    public static MapGenerator MapGenerator = new MapGenerator();
 
     public static void InitializeSeed()
     {
@@ -40,62 +48,27 @@ public class Chunk : MonoBehaviour
         Debug.Log("seed:" + SeedX + " " + SeedZ);
     }
 
-    public static int PerlinNoise(int x, int z)
+    public Tuple<BiomeType, int> GetOrComputeHeight(int x, int z)
     {
-        int amplitude = MaxAmplitude;
-        float frequency = StartFrequency;
-        int value = 0;
-        for (int i = 0; i < Octaves; i++)
-        {
-            float noise = Mathf.PerlinNoise(SeedX + x * frequency, SeedZ + z * frequency);
-            value += (int)(amplitude * noise);
-            amplitude /= 2;
-            frequency *= 2;
-        }
-
-        return BaseHeight + value;
+        // because the negative values stay negative when taking modulo we need to add the chunk size to the values
+        x = (x - ChunkSize * this.x) % ChunkSize;
+        z = (z - ChunkSize * this.z) % ChunkSize;
+        return heights[x, z] ?? (heights[x, z] = MapGenerator.GetFilteredBiomeAndHeight(x, z));
     }
 
-    public static List<int> ConstructLayers(int x, int z)
-    {
-        int height = PerlinNoise(x, z);
-        List<int> layerList = new List<int>();
-        if (height <= MinimalGrassHeight)
-        {
-            layerList = new List<int>() { height };
-        }
-        else
-        {
-            int displacement = (int)(1.5f * Mathf.PerlinNoise(x * SnowFrequency + SeedX, z * SnowFrequency + SeedZ)); // add some noise so there isnt flat border
-            //displacement = 0;
-            if (height <= MinimalSnowHeight)
-            {
-                layerList = new List<int>() { MinimalGrassHeight, height };
-            }
-            else
-            {
-                // snow layer should not be too thick
-                if (height - NormalSnowLayer < MinimalSnowHeight)
-                {
-                    if (height - MinimalSnowHeight - displacement == 1)
-                    {
-                        //there would be only one block of snow, ignore it
-                        layerList = new List<int>() { MinimalGrassHeight, height };
-                    }
-                    else
-                    {
-                        layerList = new List<int>() { MinimalGrassHeight, MinimalSnowHeight + displacement, height };
-                    }
-                }
-                else
-                {
-                    layerList = new List<int>() { MinimalGrassHeight, height - NormalSnowLayer + displacement, height };
-                }
-                
-            }
-        }
+    private static FastNoiseLite noise = new FastNoiseLite();
 
-        return layerList;
+    public SortedDictionary<int,BlockType> ConstructLayers(int x, int z)
+    {
+        GetOrComputeHeight(x,z).Deconstruct(out BiomeType biome,out int height);
+        SortedDictionary<int, BlockType> layerHeights = new SortedDictionary<int, BlockType>();
+        // add the top layer using the biome for the type of the block
+        layerHeights.Add(height, (BlockType)biome); // cursed cast but we made sure that the values match, I dont want to add myriad of block types anyway
+        // add the rest of the layers
+        int layerThicknessDisplacement = (int) (1 + (noise.GetNoise(x,z) / 2)) * LayerHeightDisplacemntAmplitude;
+        layerHeights.Add(height - BaseLayerThickness + layerThicknessDisplacement, BlockType.Rock);
+
+        return layerHeights;
     }
 
     private static readonly float SnowFrequency = 0.03125f;
@@ -103,6 +76,8 @@ public class Chunk : MonoBehaviour
     private static readonly int NormalGrassLayer = 4;
     private static readonly int MinimalSnowHeight = 68 + BaseHeight;
     private static readonly int MinimalGrassHeight = 22 + BaseHeight;
+
+    public Tuple<BiomeType,int>[,] heights = new Tuple<BiomeType, int>[ChunkSize,ChunkSize]; // caching the heights of the columns
 
     // another optimization might be to disable chunks that are not visible to the player
     // eg using heuristic using lowest and highest block in the chunk
@@ -205,13 +180,7 @@ public class Chunk : MonoBehaviour
 // if chunk was not modified by the player we can optimize by spawning only top layer
 // and any blocks that are not covered by other blocks from all directions
 
-
-// Before the column is modified it should behave differently(and be memory efficient)
-// But having two different classes brings new problems so instead I will put both List(unmodified state) and SortedDictionary(modified) in the same class
-// Which only wastes one pointer
-// If the column was not modified by player we only need to remember few values
-// Almost everything can be calculated from scratch because the terrain generation is deterministic
-// but caching some information helps and uses very little memory compared to modified columns
+// because of added complexity to the terrain generation using layer list does not make sense anymore, SortedDictionary is used the whole time now
 
 
 /// <summary>
@@ -244,24 +213,11 @@ public class Column
 
     public BlockType GetTypeAt(Vector3Int position)
     {
-        if (layerHeights == null)
+        foreach (var pair in layerHeights)
         {
-            int i = 0;
-            while (layerList[i] < position.y)
+            if (pair.Key >= position.y)
             {
-                i++;
-            }
-            return (BlockType)i;
-        }
-
-        if (layerHeights != null)
-        {
-            foreach (var pair in layerHeights)
-            {
-                if (pair.Key >= position.y)
-                {
-                    return pair.Value;
-                }
+                return pair.Value;
             }
         }
         throw new ArgumentException("The block does not exist anymore");
@@ -281,13 +237,6 @@ public class Column
         if (newBlock == BlockType.Count)
         {
             blocks.Remove(y);
-        }
-
-
-        if (layerHeights == null) // column was not modified before - change representation
-        {
-            Reconstruct();
-            layerList = null;
         }
 
         // if we are placing a block the last layer can be much lower than y - 1 causing edge cases
@@ -402,33 +351,10 @@ public class Column
         return destroyedBlock;
     }
 
-    /// <summary>
-    /// Convert data to modified column and return it
-    /// </summary>
-    public void Reconstruct()
-    {
-        //ModifiedColumn column = new ModifiedColumn(x, z);
-        layerHeights = new SortedDictionary<int, BlockType>();
-        for (int i = 0; i < layerList.Count; i++)
-        {
-            // Since there are as many layers as types of blocks we can cast index to BlockType to get the type
-            layerHeights.Add(layerList[i], (BlockType)i);
-        }
-    }
 
     public void NeighborDestroyed(int y, Chunk chunk)
     {
-        if (layerHeights == null && Chunk.PerlinNoise(x,z) >= y && !blocks.ContainsKey(y))
-        {
-            int i = 0;
-            while (layerList[i] < y)
-            {
-                i++;
-            }
-            CreateBlock(y, (BlockType)i, chunk);
-        }
-
-        if (layerHeights != null && !blocks.ContainsKey(y))
+        if (!blocks.ContainsKey(y))
         {
             foreach (var pair in layerHeights)
             {
@@ -453,27 +379,42 @@ public class Column
         for (int i = 0; i < 4; i++)
         {
             Tuple<int, int> offset = GridControl.Directions[i];
-            minNeigbor = Math.Min(Chunk.PerlinNoise(x + offset.Item1, z + offset.Item2), minNeigbor);
+            // this will likely affect performance noticeably when the player crosses the border of the chunk
+            if (x + offset.Item1 < 0 || x + offset.Item1 >= Chunk.ChunkSize || z + offset.Item2 < 0 || z + offset.Item2 >= Chunk.ChunkSize)
+            {
+                minNeigbor = Math.Min(Chunk.MapGenerator.GetFilteredBiomeAndHeight(x + offset.Item1, z + offset.Item2).Item2, minNeigbor);
+            }
+            else
+            {
+                minNeigbor = Math.Min(chunk.GetOrComputeHeight(x + offset.Item1, z + offset.Item2).Item2, minNeigbor);
+            }
+            
         }
         // top block of new chunk can always be seen
         
-        layerList = Chunk.ConstructLayers(x, z);
-        height = layerList[layerList.Count - 1];
-        int layer = 0;
-        while (layerList[layer] < height)
-        {
-            layer++;
-        }
-        CreateBlock(height, (BlockType)layer, chunk);
+        layerHeights = chunk.ConstructLayers(x, z);
+        // last entry is the top block
+        var lastLayer = layerHeights.Last();
+        height = lastLayer.Key;
+        CreateBlock(height, lastLayer.Value, chunk);
         // top block must always be spawned, others depend on neighbors
-        for (int i = height - 1; i > minNeigbor; i--)
+        if (height <= minNeigbor) // no neighbors are lower so only top block is visible
         {
-            layer = 0;
-            while (layerList[layer] < i)
+            return;
+        }
+        // find the layer of the lowest neighbor
+        var enumerator = layerHeights.GetEnumerator();
+        enumerator.MoveNext();
+        while (enumerator.Current.Key < minNeigbor) { } // find the layer of the lowest neighbor or until the end
+        // there is at least one lower neighbour so we dont need to check enumerator state
+        for (int i = minNeigbor; i <= height - 1; i++)
+        {
+            CreateBlock(i, enumerator.Current.Value, chunk);
+            // last block of a layer was spawned so we need to move to the next one
+            if (i == enumerator.Current.Key)
             {
-                layer++;
+                enumerator.MoveNext();
             }
-            CreateBlock(i, (BlockType)layer, chunk);
         }
     }
 
@@ -484,7 +425,4 @@ public class Column
     private SortedDictionary<int, GameObject> blocks = new SortedDictionary<int, GameObject>();
 
     private SortedDictionary<int, BlockType> layerHeights;
-    public List<int> layerList = new List<int>((int)BlockType.Count);
-
-
 }

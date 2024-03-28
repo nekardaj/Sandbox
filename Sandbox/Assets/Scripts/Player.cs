@@ -68,7 +68,7 @@ public class Player : MonoBehaviour
         dampingStopping /= Time.fixedDeltaTime;
         // make sure the player spawns above ground
         var gridPosition = GridControl.grid.WorldToCell(transform.position);
-        transform.position = new Vector3(gridPosition.x, Chunk.PerlinNoise(gridPosition.x, gridPosition.z) + 4, gridPosition.x);
+        transform.position = new Vector3(gridPosition.x, Chunk.MapGenerator.GetFilteredBiomeAndHeight( gridPosition.x, gridPosition.z).Item2 + 3, gridPosition.x);
         selectedBlock.sprite = blockSprites[currentBlockType];
         selectedBlockCounter = selectedBlock.GetComponentInChildren<TextMeshProUGUI>();
         selectedBlockCounter.text = ":" + blocks[currentBlockType];
@@ -276,5 +276,10 @@ public class Player : MonoBehaviour
     private void OnTriggerExit()
     {
         groundCheck -= 1;
+    }
+
+    private void OnTriggerStay()
+    {
+
     }
 }
