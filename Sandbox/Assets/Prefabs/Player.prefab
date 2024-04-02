@@ -295,7 +295,18 @@ MonoBehaviour:
   blocks: 
   menu: {fileID: 0}
   selectedBlock: {fileID: 0}
-  blockSprites: []
+  blockTextures:
+  - {fileID: 2800000, guid: 411fc77797c71ce4f8c514a9d791ff73, type: 3}
+  - {fileID: 2800000, guid: 4739171dc81586a4a96165750bb52f35, type: 3}
+  - {fileID: 2800000, guid: 20394d1f6157a414b94527e990df413e, type: 3}
+  - {fileID: 2800000, guid: b922de1bc08f9c84b92c3b4c09f55f96, type: 3}
+  - {fileID: 2800000, guid: dbef60196f5408d4dbcc9df9669b2d70, type: 3}
+  - {fileID: 2800000, guid: 28b9ce7016b7ccb49a86d76892ccd281, type: 3}
+  - {fileID: 2800000, guid: 6d36fb7a14ed3d447b36ae2a481ae644, type: 3}
+  - {fileID: 2800000, guid: b1638f955c940d74593e934462290914, type: 3}
+  - {fileID: 2800000, guid: c02f763b9fb3d4c409a801103986dc65, type: 3}
+  - {fileID: 2800000, guid: b65cb623026027d4f8673568d5c074af, type: 3}
+  - {fileID: 2800000, guid: 5e3e4a4f5b5a263469dbfc22cbbaa215, type: 3}
 --- !u!65 &1194321768572483300
 BoxCollider:
   m_ObjectHideFlags: 0

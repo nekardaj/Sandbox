@@ -2,8 +2,12 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using TerrainGenerationPCG;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEditor;
 using UnityEngine;
+using static UnityEngine.InputManagerEntry;
 
 // Blocks will be in the same order as in biome type so we can use either for indexing
 public enum BlockType {
@@ -18,8 +22,8 @@ public enum BlockType {
     Rock, // Mountain
     DeepWater,
     ShallowWater,
-    Snow,
-    Grass,
+    //Snow,
+    //Grass,
     Count
 }
 // trick that allows using block type as an index in an array, even when new types are inserted before Count everything will work
@@ -58,7 +62,8 @@ public class GridControl : MonoBehaviour
     public static Grid grid;
 
     // chunks that are too far from player will be disabled
-    public static readonly int RenderDistance = 1;
+    //public static readonly int RenderDistance = 5;
+    [Range(1, 32),SerializeField] private int RenderDistance = 3;
 
     public static readonly Tuple<int, int>[] Directions = new Tuple<int, int>[]
     {
@@ -81,8 +86,6 @@ public class GridControl : MonoBehaviour
         1.75f,
         1.0f,
         1.0f,
-        1.0f,
-        0.5f,
         1.0f,
     };
 
@@ -131,43 +134,41 @@ public class GridControl : MonoBehaviour
             return first.Item2 - second.Item2;
         }
     }
+
+    private Chunk CreateChunk(int x, int z)
+    {
+        GameObject object_ = new GameObject();
+        object_.layer = terrainLayer;
+        object_.name = "Chunk_" + x + "," + z;
+        Chunk chunk_ = object_.AddComponent<Chunk>();
+        chunkSortedDictionary.Add(new Tuple<int, int>(x, z), chunk_);
+        // New chunk was created, notify all neighbors that already exist
+        for (int i = 0; i < 4; i++)
+        {
+            Tuple<int, int> offset = GridControl.Directions[i];
+            if (chunkSortedDictionary.TryGetValue(new Tuple<int, int>(x + offset.Item1, z + offset.Item2), out Chunk neighbor))
+            {
+                // the direction is antisymetric: 3 - i swaps NS and EW because if we went north this chunk on south of its neighbor 
+                neighbor.RegisterNeighbor(chunk_, (Direction)3 - i);
+                chunk_.RegisterNeighbor(neighbor, (Direction)i);
+            }
+        }
+        return chunk_;
+    }
+
     /// <summary>
-    /// Every time the player moves we need to update the chunks which are active
+    /// Attempt at utilizing unity job system for parallelizing chunk creation
     /// </summary>
     /// <param name="position"></param>
-    public void UpdatePosition(Vector3 position)
+    public void UpdatePositionParallel(Vector3 position)
     {
         Vector3Int chunk = WorldToChunk(position);
         // move bedrock under player
         bedrock.transform.position = new Vector3(grid.WorldToCell(position).x, bedrock.transform.position.y, grid.WorldToCell(position).z);
         // disable chunk that are now too far from player and enable or instantiate new ones that are close
-        void ActivateChunk(int x, int z)
-        {
-            if (chunkSortedDictionary.ContainsKey(new Tuple<int, int>(x, z)))
-            {
-                chunkSortedDictionary[new Tuple<int, int>(x, z)].gameObject.SetActive(true);
-            }
-            else
-            {
-                GameObject object_ = new GameObject();
-                object_.layer = terrainLayer;
-                object_.name = "Chunk_" + x + "," + z;
-                Chunk chunk_ = object_.AddComponent<Chunk>();
-                chunk_.Initialize(x, z);
-                chunkSortedDictionary.Add(new Tuple<int, int>(x, z), chunk_);
-                // New chunk was created, notify all neighbors that already exist
-                for (int i = 0; i < 4; i++)
-                {
-                    Tuple<int, int> offset = GridControl.Directions[i];
-                    if (chunkSortedDictionary.TryGetValue(new Tuple<int, int>(x + offset.Item1, z + offset.Item2), out Chunk neighbor))
-                    {
-                        // the direction is antisymetric: 3 - i swaps NS and EW because if we went north this chunk on south of its neighbor 
-                        neighbor.RegisterNeighbor(chunk_, (Direction) 3 - i);
-                        chunk_.RegisterNeighbor(neighbor, (Direction)i);
-                    }
-                }
-            }
-        }
+        List<Tuple<int,int>> chunksToPreprocess = new List<Tuple<int,int>>();
+        
+
 
         if (chunk.x != lastChunk.x || chunk.z != lastChunk.z)
         {
@@ -179,6 +180,14 @@ public class GridControl : MonoBehaviour
                 offset = lastChunk.x < chunk.x ? RenderDistance : -RenderDistance;
                 for (int i = lastChunk.z - RenderDistance; i <= lastChunk.z + RenderDistance; i++)
                 {
+                    if (chunkSortedDictionary.ContainsKey(new Tuple<int, int>(chunk.x + offset, i)))
+                    {
+                        chunkSortedDictionary[new Tuple<int, int>(chunk.x + offset, i)].gameObject.SetActive(true);
+                    }
+                    else
+                    {
+                        chunksToPreprocess.Add(new Tuple<int, int>(chunk.x + offset, i));
+                    }
                     // disable chunk, there must be entry in dictionary since we were there and it must have been spawned
                     var key = new Tuple<int, int>(lastChunk.x - offset, i);
                     if (!chunkSortedDictionary.ContainsKey(key))
@@ -189,7 +198,7 @@ public class GridControl : MonoBehaviour
                     {
                         chunkSortedDictionary[key].gameObject.SetActive(false);
                     }
-                    ActivateChunk(chunk.x + offset, i);
+                    //CreateChunk(chunk.x + offset, i);
                 }
             }
 
@@ -198,6 +207,14 @@ public class GridControl : MonoBehaviour
                 offset = lastChunk.z < chunk.z ? RenderDistance : -RenderDistance;
                 for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
                 {
+                    if (chunkSortedDictionary.ContainsKey(new Tuple<int, int>(i, chunk.z + offset)))
+                    {
+                        chunkSortedDictionary[new Tuple<int, int>(i, chunk.z + offset)].gameObject.SetActive(true);
+                    }
+                    else
+                    {
+                        chunksToPreprocess.Add(new Tuple<int, int>(i, chunk.z + offset));
+                    }
                     var key = new Tuple<int, int>(i, lastChunk.z - offset);
                     if (!chunkSortedDictionary.ContainsKey(key))
                     {
@@ -207,12 +224,53 @@ public class GridControl : MonoBehaviour
                     {
                         chunkSortedDictionary[key].gameObject.SetActive(false);
                     }
-                    ActivateChunk(i, chunk.z + offset);
+                    //CreateChunk(i, chunk.z + offset);
                 }
             }
 
+            // Preprocess all chunks that need to be created
+            PrecomputeJob job = new PrecomputeJob();
+            // chunks to preprocess cannot be native array since size is not known at the time of creation
+            var preprocessData = new NativeArray<Vector2Int>(chunksToPreprocess.Count, Allocator.TempJob);
+            for (int i = 0; i < chunksToPreprocess.Count; i++)
+            {
+                preprocessData[i] = new Vector2Int(chunksToPreprocess[i].Item1, chunksToPreprocess[i].Item2);
+            }
+            job.chunks = preprocessData;
+            job.heightsData = new NativeArray<int>(Chunk.ChunkSize * Chunk.ChunkSize * chunksToPreprocess.Count, Allocator.TempJob);
+            job.biomesData = new NativeArray<BiomeType>(Chunk.ChunkSize * Chunk.ChunkSize * chunksToPreprocess.Count, Allocator.TempJob);
+            var jobHandle = job.Schedule(chunksToPreprocess.Count, 1);
+            Chunk[] chunks = new Chunk[chunksToPreprocess.Count];
+            // instantiate GOs while waiting for the job to complete
+            for (int i = 0; i < chunksToPreprocess.Count; i++)
+            {
+                chunks[i] = CreateChunk(chunksToPreprocess[i].Item1, chunksToPreprocess[i].Item2);
+            }
+            jobHandle.Complete();
+            for (int i = 0; i < preprocessData.Length; i++)
+            {
+                // cast native arrays to managed arrays
+                int[,] heights = new int[Chunk.ChunkSize, Chunk.ChunkSize];
+                BiomeType[,] biomes = new BiomeType[Chunk.ChunkSize, Chunk.ChunkSize];
+                for (int j = 0; j < Chunk.ChunkSize; j++)
+                {
+                    for (int k = 0; k < Chunk.ChunkSize; k++)
+                    {
+                        int flatIndex = j + Chunk.ChunkSize * k + i * Chunk.ChunkSize * Chunk.ChunkSize;
+                        heights[j, k] = job.heightsData[flatIndex];
+                        biomes[j, k] = job.biomesData[flatIndex];
+                    }
+                }
+
+                chunks[i].Initialize(preprocessData[i].x, preprocessData[i].y, heights, biomes);
+            }
+            // dispose of native arrays
+            preprocessData.Dispose();
+            job.heightsData.Dispose();
+            job.biomesData.Dispose();
+
             lastChunk = chunk;
-            
+
         }
     }
 
@@ -228,29 +286,72 @@ public class GridControl : MonoBehaviour
         grid = GetComponent<Grid>();
         lastChunk = WorldToChunk(player.transform.position);
 
+        int length = (2 * RenderDistance + 1);
+        // number of chunks to be preprocessed
+        int chunksCount = length * length;
+
+        var preprocessData = new NativeArray<Vector2Int>(chunksCount, Allocator.TempJob);
+        var job = new PrecomputeJob();
+        job.chunks = preprocessData;
+        job.heightsData = new NativeArray<int>(Chunk.ChunkSize * Chunk.ChunkSize * chunksCount, Allocator.TempJob);
+        job.biomesData = new NativeArray<BiomeType>(Chunk.ChunkSize * Chunk.ChunkSize * chunksCount, Allocator.TempJob);
+
         for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
         {
             for (int j = lastChunk.z - RenderDistance; j <= lastChunk.z + RenderDistance; j++)
             {
-                Debug.Log("Spawning chunk " + i + "," + j);
-                GameObject object_ = new GameObject();
-                object_.layer = terrainLayer;
-                object_.name = "Chunk_" + i + "," + j;
-                Chunk chunk = object_.AddComponent<Chunk>();
-                chunk.Initialize(i, j);
-                chunkSortedDictionary.Add(new Tuple<int, int>(i, j), chunk);
-                for (int k = 0; k < 4; k++)
-                {
-                    Tuple<int, int> offset = GridControl.Directions[k];
-                    if (chunkSortedDictionary.TryGetValue(new Tuple<int, int>(i + offset.Item1, j + offset.Item2), out Chunk neighbor))
-                    {
-                        // the direction is antisymetric: 3 - i swaps NS and EW because if we went north this chunk on south of its neighbor 
-                        neighbor.RegisterNeighbor(chunk, (Direction)3 - k);
-                        chunk.RegisterNeighbor(neighbor, (Direction)k);
-                    }
-                }
+                preprocessData[(i - (lastChunk.x - RenderDistance)) + (j - (lastChunk.z - RenderDistance)) * length] = new Vector2Int(i,j);
             }
         }
+
+        var jobHandle = job.Schedule(chunksCount, 1);
+        Chunk[] chunks = new Chunk[chunksCount];
+
+        // instantiate GOs while waiting for the job to complete
+        for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
+        {
+            for (int j = lastChunk.z - RenderDistance; j <= lastChunk.z + RenderDistance; j++)
+            {
+                chunks[(i - (lastChunk.x - RenderDistance)) + (j - (lastChunk.z - RenderDistance)) * length] = CreateChunk(i, j);
+            }
+        }
+
+        jobHandle.Complete();
+        for (int i = lastChunk.x - RenderDistance; i <= lastChunk.x + RenderDistance; i++)
+        {
+            for (int j = lastChunk.z - RenderDistance; j <= lastChunk.z + RenderDistance; j++)
+            {
+
+                int[,] heights = new int[Chunk.ChunkSize, Chunk.ChunkSize];
+                BiomeType[,] biomes = new BiomeType[Chunk.ChunkSize, Chunk.ChunkSize];
+                for (int k = 0; k < Chunk.ChunkSize; k++)
+                {
+                    for (int l = 0; l < Chunk.ChunkSize; l++)
+                    {
+                        int flatIndex = k + Chunk.ChunkSize * l + ((i - (lastChunk.x - RenderDistance)) + (j - (lastChunk.z - RenderDistance)) * length) * Chunk.ChunkSize * Chunk.ChunkSize;
+                        heights[k, l] = job.heightsData[flatIndex];
+                        biomes[k, l] = job.biomesData[flatIndex];
+                    }
+                }
+                chunks[(i - (lastChunk.x - RenderDistance)) + (j - (lastChunk.z - RenderDistance)) * length].Initialize(i, j, heights, biomes);
+            }
+        }
+        // dispose of native arrays
+        preprocessData.Dispose();
+        job.heightsData.Dispose();
+        job.biomesData.Dispose();
+    }
+
+    /// <summary>
+    /// Gets sign bit of a number
+    /// </summary>
+    /// <param name="x"></param>
+    /// <returns>0 for nonegative numbers -1 for negative</returns>
+    // the method is so short that it should get always inlined
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public static int GetSignBit(int x)
+    {
+        return x >> 31;
     }
 
     /// <summary>
@@ -261,12 +362,14 @@ public class GridControl : MonoBehaviour
     /// <returns></returns>
     public static Vector3Int CellToChunk(Vector3Int gridPosition)
     {
-        return new Vector3Int((gridPosition.x - (gridPosition.x < 0 ? Chunk.ChunkSize - 1 : 0)) / Chunk.ChunkSize, gridPosition.y / Chunk.ChunkSize ,(gridPosition.z - (gridPosition.z < 0 ? Chunk.ChunkSize - 1 : 0)) / Chunk.ChunkSize);
+        // shift to the right by 31 bits copies the sign bit to all bits - 0 for positive numbers and -1 for negative
+        // this is definitely unnecessary optimization, but I like it
+        return new Vector3Int((gridPosition.x + (Chunk.ChunkSize - 1) * (GetSignBit(gridPosition.x))) / Chunk.ChunkSize, gridPosition.y / Chunk.ChunkSize ,(gridPosition.z + (Chunk.ChunkSize - 1) * GetSignBit(gridPosition.z)) / Chunk.ChunkSize);
     }
     public static Vector3Int WorldToChunk(Vector3 position)
     {
         Vector3Int gridPosition = grid.WorldToCell(position);
-        return new Vector3Int((gridPosition.x - (gridPosition.x < 0 ? Chunk.ChunkSize - 1 : 0)) / Chunk.ChunkSize, gridPosition.y / Chunk.ChunkSize, (gridPosition.z - (gridPosition.z < 0 ? Chunk.ChunkSize - 1 : 0)) / Chunk.ChunkSize);
+        return new Vector3Int((gridPosition.x + (Chunk.ChunkSize - 1) * GetSignBit(gridPosition.x)) / Chunk.ChunkSize, gridPosition.y / Chunk.ChunkSize, (gridPosition.z + (Chunk.ChunkSize - 1) * GetSignBit(gridPosition.z)) / Chunk.ChunkSize);
     }
 
     public void AddBlock(Vector3 position, BlockType blockType)

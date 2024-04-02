@@ -3,9 +3,12 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
 using NoiseLibrary;
 using TerrainGenerationPCG;
+using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
@@ -20,26 +23,93 @@ public enum Direction
 }
 
 /// <summary>
+/// The input for the job is just chunk coordinates
+/// </summary>
+public struct PrecomputeData
+{
+    public int x;
+    public int z;
+}
+
+public struct PrecomputeJob : IJobParallelFor
+{
+    // for every chunk we have ChunkSize^2 entries so we need to ignore index restrictions
+    // every batch of ChunkSize^2 entries is for one chunk so there is no need for synchronization
+    [NativeDisableParallelForRestriction]
+    public NativeArray<int> heightsData;
+    [NativeDisableParallelForRestriction]
+    public NativeArray<BiomeType> biomesData;
+    
+    public NativeArray<Vector2Int> chunks;
+
+    public void Execute(int index)
+    {
+        Vector2Int position = chunks[index];
+        for (int i = 0; i < Chunk.ChunkSize; i++)
+        {
+            for (int j = 0; j < Chunk.ChunkSize; j++)
+            {
+                var result = Chunk.MapGenerator.GetFilteredBiomeAndHeight(position.x * Chunk.ChunkSize + i, position.y * Chunk.ChunkSize + j);
+                // for every chunk we have ChunkSize^2 entries and inside the chunk we use flat indexing
+                int flatIndex = i + Chunk.ChunkSize * j + index * Chunk.ChunkSize * Chunk.ChunkSize;
+                biomesData[flatIndex] = result.Item1;
+                heightsData[flatIndex] = result.Item2;
+            }
+        }
+    }
+
+    
+}
+
+/// <summary>
 /// Chunk is a game object so the whole chunk can be disabled when player is far away
 /// </summary>
 public class Chunk : MonoBehaviour
 {
+    #region static variables
     public static readonly int ChunkSize = 16;
     public static readonly int ChunkHeight = 256;
-
-    private static readonly int MaxAmplitude = 64;
-    private static readonly float StartFrequency = 0.0078125f; // 1/64 
-    private static readonly int Octaves = 3;
-    private static readonly int BaseHeight = 96; // corresponds to the height of zero level in the world (blocks above bedrock)
-    // it should be around twice the maximal amplitude of the noise to make sure that the noise is always positive
+    private static readonly int BaseHeight = 96;
 
     private static int SeedX;
     private static int SeedZ;
 
-    private static readonly int LayerHeightDisplacemntAmplitude = 3;
+    private static readonly int LayerHeightDisplacementAmplitude = 3;
     private static readonly int BaseLayerThickness = 4;
 
     public static MapGenerator MapGenerator = new MapGenerator();
+    #endregion
+
+    public int x
+    {
+        get;
+        private set;
+    }
+    public int z
+    {
+        get;
+        private set;
+    }
+
+    private Column[,] columns = new Column[ChunkSize, ChunkSize];
+
+    public int[,] heights; // caching the heights of the columns
+    public BiomeType[,] biomes; // caching the biomes of the columns
+    // another optimization might be to disable chunks that are not visible to the player
+    // eg using heuristic using lowest and highest block in the chunk
+    public Chunk[] neighbors = new Chunk[4]; // 4 neighbors
+
+    private static FastNoiseLite noise = new FastNoiseLite();
+
+    public bool modified
+    {
+        get;
+        private set;
+    }
+
+    // these values can be used for optimization
+    public int minimalHeight;
+    public int maximalHeight;
 
     public static void InitializeSeed()
     {
@@ -48,61 +118,80 @@ public class Chunk : MonoBehaviour
         Debug.Log("seed:" + SeedX + " " + SeedZ);
     }
 
-    public Tuple<BiomeType, int> GetOrComputeHeight(int x, int z)
+    public struct PrecomputeData
     {
-        // because the negative values stay negative when taking modulo we need to add the chunk size to the values
-        x = (x - ChunkSize * this.x) % ChunkSize;
-        z = (z - ChunkSize * this.z) % ChunkSize;
-        return heights[x, z] ?? (heights[x, z] = MapGenerator.GetFilteredBiomeAndHeight(x, z));
-    }
+        private const int Size = 16;
+        public NativeArray<int> heightsData;
+        public NativeArray<BiomeType> biomesData;
+        public int x;
+        public int z;
 
-    private static FastNoiseLite noise = new FastNoiseLite();
+        public PrecomputeData(int x, int z)
+        {
+            this.x = x;
+            this.z = z;
+            heightsData = new NativeArray<int>(ChunkSize * ChunkSize, Allocator.TempJob);
+            biomesData = new NativeArray<BiomeType>(ChunkSize * ChunkSize, Allocator.TempJob);
+        }
+    }
+    /// <summary>
+    /// When caching cannot be used this method is used to compute the height of the column
+    /// Does not use caching, the column is assumed to be in a different chunk which might not exist yet
+    /// </summary>
+    /// <param name="x">X coordinate of a column(not chunk)</param>
+    /// <param name="z">Z coordinate of a column(not chunk)</param>
+    /// <returns></returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Tuple<BiomeType, int> ComputeHeight(int x, int z)
+    {
+        return MapGenerator.GetFilteredBiomeAndHeight(x, z);
+    }
 
     public SortedDictionary<int,BlockType> ConstructLayers(int x, int z)
     {
-        GetOrComputeHeight(x,z).Deconstruct(out BiomeType biome,out int height);
+        int localX = (x - ChunkSize * this.x);
+        int localZ = (z - ChunkSize * this.z);
+        BiomeType biome = biomes[localX, localZ];
+        int height = heights[localX, localZ];
         SortedDictionary<int, BlockType> layerHeights = new SortedDictionary<int, BlockType>();
         // add the top layer using the biome for the type of the block
         layerHeights.Add(height, (BlockType)biome); // cursed cast but we made sure that the values match, I dont want to add myriad of block types anyway
         // add the rest of the layers
-        int layerThicknessDisplacement = (int) (1 + (noise.GetNoise(x,z) / 2)) * LayerHeightDisplacemntAmplitude;
+        int layerThicknessDisplacement = (int) ((1 + noise.GetNoise(x,z)) / 2 * LayerHeightDisplacementAmplitude);
         layerHeights.Add(height - BaseLayerThickness + layerThicknessDisplacement, BlockType.Rock);
 
         return layerHeights;
     }
-
-    private static readonly float SnowFrequency = 0.03125f;
-    private static readonly int NormalSnowLayer = 4;
-    private static readonly int NormalGrassLayer = 4;
-    private static readonly int MinimalSnowHeight = 68 + BaseHeight;
-    private static readonly int MinimalGrassHeight = 22 + BaseHeight;
-
-    public Tuple<BiomeType,int>[,] heights = new Tuple<BiomeType, int>[ChunkSize,ChunkSize]; // caching the heights of the columns
-
-    // another optimization might be to disable chunks that are not visible to the player
-    // eg using heuristic using lowest and highest block in the chunk
-    public Chunk[] neighbors = new Chunk[4]; // 4 neighbors
-
     public void RegisterNeighbor(Chunk chunk, Direction direction)
     {
         neighbors[(int)direction] = chunk;
     }
 
-    // these values can be used for optimization
-    public int minimalHeight;
-    public int maximalHeight;
-
-    public void Initialize(int x, int z)
+    public void PrecomputeHeights(int x, int z)
     {
-        this.x = x;
-        this.z = z;
-        modified = false;
-        columns = new Column[ChunkSize,ChunkSize];
+        heights = new int[ChunkSize, ChunkSize];
+        biomes = new BiomeType[ChunkSize, ChunkSize];
         for (int i = 0; i < ChunkSize; i++)
         {
             for (int j = 0; j < ChunkSize; j++)
             {
-                columns[i,j] = new Column(x * ChunkSize + i, z * ChunkSize + j, this);
+                MapGenerator.GetFilteredBiomeAndHeight(x * ChunkSize + i, z * ChunkSize + j).Deconstruct(out biomes[i, j], out heights[i, j]);
+            }
+        }
+    }
+    public void Initialize(int x, int z, int[,] precomputedHeights, BiomeType[,] precomputedBiomes)
+    {
+        heights = precomputedHeights;
+        biomes = precomputedBiomes;
+        this.x = x;
+        this.z = z;
+        modified = false;
+        columns = new Column[ChunkSize, ChunkSize];
+        for (int i = 0; i < ChunkSize; i++)
+        {
+            for (int j = 0; j < ChunkSize; j++)
+            {
+                columns[i, j] = new Column(x * ChunkSize + i, z * ChunkSize + j, this);
             }
         }
     }
@@ -160,18 +249,6 @@ public class Chunk : MonoBehaviour
         Column column = columns[x, z];
         _ = column.BlockReplaced(position.x, position.y, position.z, this, blockType);
     }
-
-    private int x;
-    private int z;
-
-    private Column[,] columns = new Column[ChunkSize, ChunkSize];
-
-    public bool modified
-    {
-        get;
-        private set;
-    }
-
 }
 
 // One of the invariants that should be preserved is this: all the chunks around the player are spawned
@@ -379,14 +456,16 @@ public class Column
         for (int i = 0; i < 4; i++)
         {
             Tuple<int, int> offset = GridControl.Directions[i];
+            int localX = (x + offset.Item1 - Chunk.ChunkSize * chunk.x);
+            int localZ = (z + offset.Item2 - Chunk.ChunkSize * chunk.z);
             // this will likely affect performance noticeably when the player crosses the border of the chunk
-            if (x + offset.Item1 < 0 || x + offset.Item1 >= Chunk.ChunkSize || z + offset.Item2 < 0 || z + offset.Item2 >= Chunk.ChunkSize)
+            if (localX < 0 || localX >= Chunk.ChunkSize || localZ < 0 || localZ >= Chunk.ChunkSize)
             {
-                minNeigbor = Math.Min(Chunk.MapGenerator.GetFilteredBiomeAndHeight(x + offset.Item1, z + offset.Item2).Item2, minNeigbor);
+                minNeigbor = Math.Min(chunk.ComputeHeight(x + offset.Item1, z + offset.Item2).Item2, minNeigbor);
             }
             else
             {
-                minNeigbor = Math.Min(chunk.GetOrComputeHeight(x + offset.Item1, z + offset.Item2).Item2, minNeigbor);
+                minNeigbor = Math.Min(chunk.heights[localX, localZ], minNeigbor);
             }
             
         }
@@ -405,7 +484,10 @@ public class Column
         // find the layer of the lowest neighbor
         var enumerator = layerHeights.GetEnumerator();
         enumerator.MoveNext();
-        while (enumerator.Current.Key < minNeigbor) { } // find the layer of the lowest neighbor or until the end
+        while (enumerator.Current.Key < minNeigbor)
+        {
+            enumerator.MoveNext();
+        } // find the layer of the lowest neighbor or until the end
         // there is at least one lower neighbour so we dont need to check enumerator state
         for (int i = minNeigbor; i <= height - 1; i++)
         {

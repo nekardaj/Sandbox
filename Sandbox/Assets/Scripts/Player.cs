@@ -39,7 +39,8 @@ public class Player : MonoBehaviour
 
     [SerializeField] private Image selectedBlock;
     private TextMeshProUGUI selectedBlockCounter;
-    [SerializeField] Sprite[] blockSprites;
+    [SerializeField] Texture2D[] blockTextures;
+    Sprite[] blockSprites;
 
     private float rotationY;
 
@@ -68,10 +69,18 @@ public class Player : MonoBehaviour
         dampingStopping /= Time.fixedDeltaTime;
         // make sure the player spawns above ground
         var gridPosition = GridControl.grid.WorldToCell(transform.position);
-        transform.position = new Vector3(gridPosition.x, Chunk.MapGenerator.GetFilteredBiomeAndHeight( gridPosition.x, gridPosition.z).Item2 + 3, gridPosition.x);
-        selectedBlock.sprite = blockSprites[currentBlockType];
+        transform.position = new Vector3(gridPosition.x, Chunk.MapGenerator.GetFilteredBiomeAndHeight( gridPosition.x, gridPosition.z).Item2 + 2, gridPosition.z);
+        // assign the texture to selected block image
+        
         selectedBlockCounter = selectedBlock.GetComponentInChildren<TextMeshProUGUI>();
         selectedBlockCounter.text = ":" + blocks[currentBlockType];
+
+        // create sprites from textures
+        blockSprites = new Sprite[blockTextures.Length];
+        for (int i = 0; i < blockTextures.Length; i++)
+        {
+            blockSprites[i] = Sprite.Create(blockTextures[i], new Rect(0, 0, selectedBlock.sprite.rect.width, selectedBlock.sprite.rect.height), new Vector2(0.5f, 0.5f));
+        }
     }
 
     void Update()
@@ -214,7 +223,8 @@ public class Player : MonoBehaviour
             selectedBlockCounter.text = ":" + blocks[currentBlockType];
         }
         transform.Rotate(new Vector3(0, rotationSpeed * mouseX, 0));
-        grid.UpdatePosition(transform.position);
+        //grid.UpdatePosition(transform.position);
+        grid.UpdatePositionParallel(transform.position);
 
     }
     void FixedUpdate()
