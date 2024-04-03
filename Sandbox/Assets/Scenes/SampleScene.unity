@@ -601,7 +601,7 @@ MonoBehaviour:
   gridSize: {x: 128, y: 1, z: 128}
   player: {fileID: 383051961}
   bedrock: {fileID: 1339383094}
-  RenderDistance: 3
+  RenderDistance: 4
 --- !u!1 &705507993
 GameObject:
   m_ObjectHideFlags: 0

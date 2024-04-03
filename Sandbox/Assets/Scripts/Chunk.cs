@@ -74,8 +74,8 @@ public class Chunk : MonoBehaviour
     private static int SeedX;
     private static int SeedZ;
 
-    private static readonly int LayerHeightDisplacementAmplitude = 3;
-    private static readonly int BaseLayerThickness = 4;
+    private static readonly float LayerHeightDisplacementAmplitude = 2.5f;
+    private static readonly int BaseLayerThickness = 5;
 
     public static MapGenerator MapGenerator = new MapGenerator();
     #endregion
@@ -100,6 +100,13 @@ public class Chunk : MonoBehaviour
     public Chunk[] neighbors = new Chunk[4]; // 4 neighbors
 
     private static FastNoiseLite noise = new FastNoiseLite();
+
+    static Chunk()
+    {
+        noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+        noise.SetSeed(System.DateTime.Now.Millisecond ^ 0b101001);
+        noise.SetFrequency(0.05f);
+    }
 
     public bool modified
     {
